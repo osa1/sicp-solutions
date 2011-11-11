@@ -1,0 +1,281 @@
+2.14, 2.15 ve 2.16'da neden bahsettiğini çözemediğimden yapmadım, biri gelip anlatmazsa veya birden içime doğmazsa falan, uğraşmayacağım sanırım(genel olarak floating point sayılardaki hesaplama zorlukları hakkında ama işte..)
+
+
+## Ex 2.1
+Pay ve paydadan sadece biri negatifse, pay negatif, payda pozitif, diğer durumlarda hem pay hem payda pozitif olsun istiyor yani.
+
+    
+     (define (make-rat n d)
+         (let ((g (gcd n d)))
+           (if (or (and (>= n 0) (< d 0)) (and (< n 0) (>= d 0)))
+               (cons (- (abs(/ n g))) (abs (/ d g)))
+               (cons (abs (/ n g)) (abs (/ d g))))))
+
+    > (make-rat -10 0)
+    (-1 . 0)
+    > (make-rat 0 -10)
+    (0 . 1)
+    > (make-rat -10 4)
+    (-5 . 2)
+    > (make-rat 4 -10)
+    (-2 . 5)
+    > (make-rat -4 -10)
+    (2 . 5)
+
+
+## Ex 2.2
+Çok birşey söylemeye gerek yok aslında. Rasyonel sayıları göstermek için kullandığımız tekniği daha kompleks bir yapı için aynen kullanacağız.
+
+    
+    ;; aslinda burda (define make-segment cons) cozumu de gayet hos bence
+    (define (make-segment start-point end-point)
+        (cons start-point end-point))
+
+    (define (start-segment segment)
+        (car start-segment))
+
+    (define (end-segment segment)
+        (cdr segment))
+
+    (define (midpoint-segment segment)
+        (let ((start (start-segment segment))
+              (end   (end-segment segment)))
+          (make-point (/ (+ (x-point start) (x-point end)) 2)
+                      (/ (+ (y-point start) (y-point end)) 2))))
+
+make-point make-rat'in aynısı.
+
+    
+    (define (make-point x y)
+        (cons x y))
+
+    (define (x-point p)
+        (car p))
+
+    (define (y-point p)
+        (cdr p))
+
+    ;; testler
+    > (define test-segment (make-segment (make-point 10 4) (make-point -40 19)))
+    > (end-segment test-segment)
+    (-40 . 19)
+    > (start-segment test-segment)
+    (10 . 4)
+    > (midpoint-segment test-segment)
+    (-15 . 23/2)
+    > (print-point (midpoint-segment test-segment))
+    (-15, 23/2)
+
+
+## Ex 2.3
+Alan ve çevre fonksiyonlarının çalışabilmesi için ihtiyacımız olan minimum veri, dikdörtgenin genişliği ve yüksekliği.
+
+    
+    (define (perimeter-rect rect)
+        (* 2 (+ (height-rect rect) (width-rect rect))))
+
+    (define (area-rect rect)
+        (* (height-rect rect) (width-rect rect)))
+
+height-rect ve width-rect fonksiyonları doğru çalıştığı sürece alan ve çevreyi bunlarla hesaplayabiliriz. Burda dikdörtgen için 2 tasarım geliyor benim aklıma: birincisi, sol üst köşenin koordinatı, genişliği ve yüksekliğini tutmak, ikincisi sol üst köşenin ve alt sağ köşenin koordinatını tutmak. İlk yöntem:
+
+    
+    ;; dikdortgenleri, (baslangic-noktasi, boyut) ikilisi seklinde tutuyoruz
+    ;; boyut da yine (genislik, yukseklik) ikilisi
+    (define (make-rect topleft size)
+        (cons topleft size))
+
+    (define (topleft-rect rect)
+        (car rect))
+
+    (define (size-rect rect)
+        (cdr rect))
+
+    ;; daha sonra bu implementasyon icin genislik ve yukseklik fonksiyonlari
+    (define (height-rect rect)
+        (y-point (size-rect rect)))
+
+    (define (width-rect rect)
+        (x-point (size-rect rect)))
+
+İkinci yöntem(üst sol köşe ve alt sağ köşenin koordinatlarını tutmak):
+
+    
+    (define (make-rect topleft bottomright)
+        (cons topleft bottomright))
+
+    (define (topleft-rect rect)
+        (car rect))
+
+    (define (bottomright-rect rect)
+        (cdr rect))
+
+    (define (height-rect rect)
+        (- (y-point (bottomright-rect rect)) (y-point (topleft-rect rect))))
+
+    (define (width-rect rect)
+        (- (x-point (bottomright-rect rect)) (x-point (topleft-rect rect))))
+
+Ana fikir: Veriyi tutuş şeklimiz, dolayısıyla constructor ve selectorlarımız farklı olmasına rağmen, `height-rect` ve `width-rect` fonksiyonlarını sağlayabildiğimiz sürece `area-rect` ve `perimeter-rect` i değiştirmemize gerek kalmadı.
+
+
+## Ex 2.4
+
+    
+    (define (cdr z)
+        (z (lambda (p q) q)))
+
+Çözümü tam anlamadan, soruda tanımlanmış `car` a bakarak da yazabiliriz aslında. Yerine koyma metoduyla inceleyelim:
+
+    (cdr (cons x y))
+    (cdr (lambda (m) (m x y)))
+    ((lambda (m) (m x y)) (lambda (p q) q))
+    ((lambda (p q) q) x y)
+    ((lambda (x y) y))
+    y
+
+
+## Ex 2.5
+İkililerimizi (2^a)(3^b) şeklinde kolayca tutabiliriz. Burda önemli olan 2 ve 3'ün aralarında asal olması. Örneğin (8^a)(9^b) şeklinde de tutabilirdik.
+
+Bu şekilde tuttuğumuz ikililerin ilk elemanını istediğimizde, sayıyı 3'e bölünebildiği kadar bölüp (3^b) kısmını eledikten sonra log2 ile a'yı tespit edebiliriz. b için de aynı şeyler.
+
+    
+    ;; istedigimiz tabana gore log alan bir fonk bulamadim
+    (define (logb n b)
+        (define (log-iter n sum)
+          (if (= n 1)
+              sum
+              (log-iter (/ n b) (+ 1 sum))))
+        (log-iter n 0))
+
+    (define (cons a b)
+        (* (expt 2 a) (expt 3 b)))
+
+    (define (car pair)
+        (define (iter n)
+          (if (zero? (modulo n 3))
+              (iter (/ n 3))
+              n))
+        (logb (iter pair) 2))
+
+## Ex 2.6
+Bunu ilk gördüğümde kopmuştum, hayatıda gördüğüm en "ilk gördüğümde en saçma gelen" şey :) . Lambda calculus veya church numerals nedir pek bir bilgim yok, ama bu sorudan çıkardığım kadarıyla, lambda calculus'da herşey fonksiyon, ve numaralar yerine bir 0 fonksiyonu ve ona göre diğer sayılar için fonksiyonlar oluşturuluyor(ya da böyle birşey işte, hiçbir şey anlamadım ben bu işten).
+
+    
+    (define zero (lambda (f) (lambda (x) x)))
+
+    (define (add-1 n)
+        (lambda (f) (lambda (x) (f ((n f) x)))))
+
+Her ne kadar ben `zero` fonksiyonunu anlamasam da, yerine koyarak `add-1` ne yapıyormuş görelim.
+
+    
+    (add-1 zero)
+    (add-1 (lambda (f) (lambda (x) x)))
+    (lambda (f) (lambda (x) (f (((lambda (f) (lambda (x) x)) f) x))))
+    (lambda (f) (lambda (x) (f ((lambda (x) x) x))))
+    (lambda (f) (lambda (x) (f x)))
+
+`(add-1 zero)` nun bize 1'i verdiğini düşünürsek, bu 1'in aslında herhangi bir değere f fonksiyonunu 1 kere uygulayan bir fonksiyon dönen bir fonksiyon(ugh) olduğunu düşünebiliriz(sanrım, ya da ben bu olayı tamamen yanlış anladım). Bu durumda 2, bu fonksiyonu 2 kere uygulayan fonksiyon dönen fonksiyon(puhah) olmalı! (bu arada yukarıda anlamadım dediğim yerleri de yolda anladığımı farkettim)
+
+    
+    (define one
+        (lambda (f) (lambda (x) (f x))))
+
+    (define two
+        (lambda (f) (lambda (x) (f (f x)))))
+
+Son olarak toplama fonksiyonu epey zor geldi bana. Bu kısmı anlatmak gereçekten zor(denedim sonra sildim yani). Muhtemelen Wikipedia'da bu konu ile alakalı daha detaylı bilgi ve benzer kodlar vardır, ben tüm kitabı çözene kadar herhangi bir kaynağa bakmıyorum :) .
+
+    
+    (define (+ a b)
+        (lambda (f) (lambda (x) ((a f) ((b f) x)))))
+
+Bu kısmı kahkahalar içerisinde okudum resmen, lambda calculus'u da iyice merak ettim.
+
+
+## Ex 2.7
+Daha önce defalarca yaptığımız gibi, `cons` ile ikili oluşturup, `car` ve `cdr` ile birinci ve ikinci elemanı alıyoruz. Kodu yazmıyorum.
+
+## Ex 2.8
+İki hata payının farkına neden ihtiyaç duyulabiliyor bilmiyorum(bölme olabilir mi?), ama aynen toplamadaki gibi şu şekilde yapılabilir:
+
+    
+    (define (sub-interval x y)
+        (make-interval (- (lower-bound x) (lower-bound y))
+                       (- (upper-bound x) (upper-bound y))))
+
+## Ex 2.9
+`width` fonksyionunu tanımlayıp deneyerek görelim(eğer zaten bariz değilse):
+
+    
+    (define (width-interval a)
+        (/ (+ (upper-bound a) (lower-bound a)) 2))
+
+    (define i1 (make-interval 3 5))
+    (define i2 (make-interval 4 7))
+
+    (width-interval (add-interval i1 i2))
+    ;; 19/2
+    (+ (width-interval i1) (width-interval i2))
+    ;; 19/2
+    (width-interval (mul-interval i1 i2))
+    ;; 47/2
+    (* (width-interval i1) (width-interval i2))
+    ;; 22
+
+## Ex 2.10
+
+    
+    (define (div-interval x y)
+        (if (or (and (<= (lower-bound y) 0) (>= (upper-bound y) 0))
+                (and (>= (lower-bound y) 0) (<= (upper-bound y) 0)))
+            (error "divisor spans zero" y)
+            (mul-interval x
+                          (make-interval (/ 1.0 (upper-bound y))
+                                         (/ 1.0 (lower-bound y))))))
+
+## Ex 2.11
+
+Ben reisin söylemeye çalıştığı şey şu: Çarpma sırasında, minimum çarpım ve maksimum çarpımı tespit etmek için, aralıklarımızın tüm uç durumlarını birbirleriyle çarpıp, içlerinden en büyüğü ve en küçüğü seçiyoruz. Bunun yerine, uç noktaların hangileri pozitif, hangileri negatif bilirsek, daha az hesaplamayla halledebiliriz. Birkaç örnek vereyim; diyelim ki X'in alt sınırı negatif, üst sınırı pozitif, Y'nin ise ikisi de pozitif. Bu durumda yeni alt sınırı bulmak için, X'in alt sınırıyla Y'nin üst sınırını çarpmalıyız. Tek çarpımda alt sınırı bulduk. Üst sınır için de X'in ve Y'nin üst sınırını çarpacağız.
+
+upper-boundun her zaman lower-bound'dan büyük olduğu düşünüldüğünde 9 durum oluşuyor. Kod çok uğraştırıcı geldi, üşendim.
+
+## Ex 2.12
+
+    
+    (define (make-center-percent center percent)
+        (cons (- center (/ (* center percent) 100)) 
+              (+ center (/ (* center percent) 100))))
+
+    (define (percent i)
+        (/ (* 100 (- (upper-bound i) (center i))) (center i)))
+
+## Ex 2.13
+Birkaç denemeyle kolayca görebiliriz.
+
+    
+    > (percent (mul-interval (make-center-percent 10 0.01)
+                             (make-center-percent 10 0.02)))
+    0.02999999940000115
+    > (percent (mul-interval (make-center-percent 10 0.004)
+                             (make-center-percent 10 0.006)))
+    0.009999999976019327
+    > (percent (mul-interval (make-center-percent 10 0.0005)
+                             (make-center-percent 10 0.0001)))
+    0.0006000000000027071
+
+Burda orta noktalarının(`center`) önemli olmadığına dikkat. 10 yerine istediğimiz herhangi bir değer verebiliriz. Burdan eğer hata payı yüzdesi yeterince küçükse, çarpımın hata payı, çarpılan aralıkların hata paylarının yaklaşık olarak toplamına eşit olduğunu görebiliriz.
+
+## Ex 2.14
+
+TODO
+
+## Ex 2.15
+
+TODO
+
+## Ex 2.16
+
+TODO
