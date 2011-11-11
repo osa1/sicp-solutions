@@ -222,18 +222,18 @@ d) Yapıyı tutuş şeklimizi `list`den `pair`a çevirirsek, a şıkkında bahse
 Herhangi bir higher-order fonksiyon kullanmadan:
 
 
-(define (square-tree tree)
-  (cond ((null? tree) '())
-        ((not (pair? tree)) (* tree tree))
-        (else (cons (square-tree (car tree))
-                    (square-tree (cdr tree))))))
+    (define (square-tree tree)
+      (cond ((null? tree) '())
+            ((not (pair? tree)) (* tree tree))
+            (else (cons (square-tree (car tree))
+                        (square-tree (cdr tree))))))
 
 Burda `pair?` fonksyionu biraz değişik çalışıyor. `list?` gibi, ama dotted pairlarda da `#t` dönüyor.
 
-(pair? (cons 1 2))
-#t
-(list? (cons 1 2))
-#f
+    (pair? (cons 1 2))
+    #t
+    (list? (cons 1 2))
+    #f
 
 Geriye kalan tüm durumlarda davranışı aynı `list?` gibi.
 
