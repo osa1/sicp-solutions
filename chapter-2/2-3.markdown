@@ -1,0 +1,304 @@
+## Ex 2.53
+
+    
+    > (list 'a 'b 'c)
+    (a b c)
+    > (list (list 'george))
+    ((george))
+    > (cdr '((x1 x2) (y1 y2)))
+    ((y1 y2))
+    > (cadr '((x1 x2) (y1 y2)))
+    (y1 y2)
+    > (pair? (car '(a short list)))
+    #f
+    > (memq 'red '((red shoes) (blue socks)))
+    #f
+    > (memq 'red '(red shoes blue socks))
+    (red shoes blue socks)
+
+
+## Ex 2.54
+
+    
+    (define (equal? e1 e2)
+      (cond ((and (null? e1) (null? e2)) #t)
+            ((eq? (car e1) (car e2)) (equal? (cdr e1) (cdr e2)))
+            (else #f)))
+
+## Ex 2.55
+
+`'` sembolünün nasıl çalıştığı 34. notta anlatılıyor. `'a` aslında `(quote a)`ya dönüştürülüyor(kitapda henüz nasıl olduğunu anlatılmıyor ama örneğin Clojure'da, `'` bir reader macrosu ve derlenme zamanında `(quote ..)`a dönüştürülüyor).
+
+Yani `''abracadabra` `(quote (quote abracadabra))`ya dönüştürülüyor. İlk elemanı `quote` sembolü olan bir list. Dolayısıyla `car` bize `quote` sembolünü veriyor.
+
+## Ex 2.56
+
+Kodun ilk kısmında yapıldığı gibi, ilk önde `deriv` fonksiyonunda gerekli değişiklikleri ypaıp, daha sonra constructor ve selectorları yazdım:
+
+    
+    (define (deriv exp var)
+      (cond ((number? exp) 0)
+            ((variable? exp)
+             (if (same-variable? exp var) 1 0))
+            ((sum? exp)
+             (make-sum (deriv (addend exp) var)
+                       (deriv (augend exp) var)))
+            ((product? exp)
+             (make-sum
+              (make-product (multiplier exp)
+                            (deriv (multiplicand exp) var))
+              (make-product (deriv (multiplier exp) var)
+                            (multiplicand exp))))
+            ((exponentiation? exp) ;; bu kismi ekledim
+             (if (same-variable? (base exp) var)
+                 (make-product (exponent exp)
+                               (make-exponentiation (base exp)
+                                                    (- (exponent exp) 1)))
+                 0))
+            (else
+             (error "unknown expression type -- DERIV" exp))))
+
+    (define (exponentiation? exp)
+      (and (pair? exp) (eq? (car exp) '**)))
+
+    (define (make-exponentiation base exp)
+      (cond ((=number? base 0) 0)
+            ((=number? exp 0) 1)
+            (else (list '** base exp))))
+
+    (define (base exp)
+      (cadr exp))
+
+    (define (exponent exp)
+      (caddr exp))
+
+## Ex 2.57
+
+    (define (augend s)
+      (if (= (length (cddr s)) 1)
+          (caddr s)
+          (append (list '+) (cddr s))))
+
+
+Augend için ben `make-sum` kullanmadım, `apply` kullanmadan güzel bir tasarım yapamadım ve `apply`ı da bu aşamada öğrenmemiştik. Aynı şekilde multiplicand'ı da değiştirebiliriz.
+
+    (define (multiplicand p)
+      (if (= (length (cddr p)) 1)
+          (caddr p)
+          (append (list '*) (cddr p))))
+
+Bunun gibi, sistemimizde değişme özelliği olan tüm işlemler için buna benzer fonksiyonlar tanımlayabiliriz.
+
+
+## Ex 2.58
+
+İlk aşama çok kolay, tüm formlarımız `(operand operator operand)` şeklinde sıralandığından(operandlar yine başka bir form olabilir), tek yapmamız gereken `selector` fonksiyonlarımızda birkaç değişiklik yapmak:
+
+    (define (sum? x)
+      (and (pair? x) (eq? (cadr x) '+)))
+    (define (addend s) (car s))
+    (define (augend s) (caddr s))
+
+    (define (product? x)
+      (and (pair? x) (eq? (cadr x) '*)))
+    (define (multiplier p)
+      (car p))
+    (define (multiplicand p)
+      (caddr p))
+
+İkinci aşama biraz zor. Ben şöyle bir yol izleyeceğim: `augend` ve `multiplicand` fonksiyonlarım artık tek bir operand(veya form) değil, birden fazla bekleyecek(bir önceki soruda olduğu gibi yani, kolay olsun diye sadece + ve * operatorlerimiz olduğunu varsaydım, diğerleri aynı şekilde eklenebilir):
+
+    (define (multiplicand p)
+      (if (= 1 (length (cddr p)))
+          (caddr p)
+          (cddr p)))
+
+    (define (augend s)
+          (if (= (length (cddr s)) 1)
+              (caddr s)
+              (cddr s)))
+
+Bundan sonra yapmamız gereken, tüm formu gezerek, ilk önce çarpma işlemlerini, sonra toplama işlemlerini recursive olarak yapmak(operandlar başka işlemler de olabilir, parantez içlerinde olurlarsa):
+
+    (define (calculate x)
+      (cond ((null? x) 0)
+            ((number? x) x)
+            ((sum? x) (make-sum (calculate (addend x))
+                                (calculate (augend x))))
+            ((product? x) (make-product (calculate (multiplier x))
+                                        (calculate (multiplicand x))))
+            (else (error "Can't calculate form -- CALCULATE"
+                         x))))
+
+Yapabileceğim en basit tasarım sanırım bu.
+
+    > (calculate '((1 + 2) * 10))
+    30
+    > (calculate '(1 + 2 * 10))
+    21
+    > (calculate '(1 + 2 + 3 * 10 * 20))
+    603
+    > (calculate '((1 + 2 + 3) * 10 * 20))
+    1200
+    > 
+
+
+## Ex 2.59
+
+    
+    (define (union-set set1 set2)
+      (cond ((null? set2) set1)
+            ((not (element-of-set? (car set2) set1))
+             (union-set (cons (car set2) set1) (cdr set2)))
+            (else (union-set set1 (cdr set2)))))
+
+## Ex 2.60
+
+`element-of-set?` yine aynı olurdu. `adjoin-set`de, ekleyeceğimiz eleman zaten var mı diye kontrol etmemize gerek kalmazdı, direkt olarak `(cons x set)` yapabiliriz yani. `union-set` ise direkt `append` olurdu, yani `(append set1 set2)`. `intersection-set` değişmezdi.
+
+`element-of-set?` daha iyi de olabilir kötü de, yani aradığımız elemanı bulana kadar bir sürü tekrar eden aramadığımız eleman, arama işleminin daha uzun sürmesine sebep olur. `adjoin-set` artık O(1) olurdu, çünkü artık ekleyeceğimiz elemanın varlığını kontrol etmiyoruz. Aynı şekilde `union-set`de.
+
+Elemanların tekrar ettiği implementasyonu `union` ve `adjoin` işlemlerinin çok yapılıp, nadiren kontrol yapıldığı durumlar için kullanabiliriz.
+
+## Ex 2.61
+
+    
+    (define (adjoin-set x set)
+      (cond ((null? set) (list x))
+            ((< x (car set)) (cons x set))
+            ((= x (car set)) set)
+            (else (cons (car set)
+                        (adjoin-set (cdr set))))))
+
+Belki ilk önce O(lgN) de arama yapılıp(`element-of-set?` ile), daha sonra eğer elemen kümedeyse direkt olarak kümeyi dönüp, kümede değilse yukarıdaki işlem yapılabilir. Bu şekilde eleman kümedeyse de yeniden bir küme oluşturuluyor.
+
+Şöyle mesela:
+
+    
+    (define (adjoin-set x set)
+      (define (add-to-set x set)
+        (if (< x (car set))
+            (cons x set)
+            (cons (car set) (add-to-set x (cdr set)))))
+      (if (element-of-set? x set)
+          set
+          (add-to-set x set)))
+
+
+## Ex 2.62
+
+    
+    (define (union-set set1 set2)
+      (cond ((null? set2) set1)
+            ((null? set1) set2)
+            ((= (car set1) (car set2))
+             (cons (car set1) (union-set (cdr set1) (cdr set2))))
+            ((< (car set1) (car set2))
+             (cons (car set1) (union-set (cdr set1) set2)))
+            ((< (car set2) (car set1))
+             (cons (car set2) (union-set set1 (cdr set2))))))
+
+
+## Ex 2.63
+
+İki yöntem de aynı listeyi üretir. İkisi de ilk önce ağacın sol dalını, sonra kökünü, sonra sağ dalını listeye ekliyor(inorder traversal).
+
+İki yöntem de tamamen aynı şeyi yapıyor ve büyüme oranı O(n).
+
+## Ex 2.64
+
+Yapılan ara hesaplamaları açıklayarak neden çalıştığını kolayca anlayabiliriz. İlk başta `left-size`, `(n - 1) / 2` şeklinde hesaplanıyor. Burda `n` üretmek istediğimiz ağacın eleman sayısı. Çıkardığımız 1 ağacın kökü için, geriye `n - 1` eleman kalıyor, bunu da ikiye bölerek sol dalda kaç elemanlı bir ağaç olacağını tespit ediyoruz.
+
+`left-result`da, ilk elemanı sol daldaki ağacımız, ikinci elemanı ağaçda olmayan elemanlar olan bir `pair`. `(car left-result)` ile sol ağacı alıyor, `(cdr left-result)` ile sol ağaca dahil olmayan elemanları alıyoruz. `right-size`'ı da hesap ettikten sonra sağ ağacı oluşturabiliriz(burda 1 yine ağacın kökündeki eleman için).
+
+`this-entry`, ağacımızın kökündeki eleman. `right-result` da yine `left-result` gibi, bu sefer ağacımızın sağ dalındaki ağaç için hesaplıyoruz.
+
+`right-tree`, aynı `left-result` gibi bir yapıya sahip, ilk elemanı bir ağaç, ikinci elemanı ise ağaca dahil olmayan elemanlar. 
+
+Son olarak da ağacı oluşturuyoruz, kökü `this-entry`, sol dalı `left-tree` ve sağ dalı da `right-tree` olacak şekilde. Daha sonra ilk elemanı ağaç, ikinci elemanı da ağaçda olmayan elemanlar olan bir pair dönüyoruz.
+
+Büyüme oranına da, tüm elemanlar için `partial-tree` fonksiyonu bir kere çağırıldığından, O(n) diyebiliriz.
+
+## 2.65
+
+2.63'de O(n)'de ağacı listeye dönüştüyoruz, 2.64'de de tam tersi, yine O(n)de. Binary tree'ler ile O(n)'de union alıştırma 2.62'de yapmıştık, intersection'da yine bu bölümde var. Dolasıyla birşey yazmaya gerek yok diye düşünüyorum :P
+
+Aslında ağacı listeye dönüştürmeden de yapmanın yolları da var tabii ki, ama ağacın dengesini yeniden korumak için birkaç işlem daha yapmamız gerek.
+
+## 2.66
+
+    
+    (define (lookup key set)
+      (let ((root-key (caar set)))
+        (cond ((null? set) null)
+              ((= key root-key) (car set))
+              ((< key root-key) (lookup key (left-branch set)))
+              ((> key root-key) (lookup key (right-branch set))))))
+
+## 2.67
+
+    
+    > (decode sample-message sample-tree)
+    (A D A B B C A)
+
+## 2.68
+
+`encode-symbol` fonksiyonunu iki alt fonksiyona böldüm, birisi `symbol-in-tree?`, verilen bir sembolün tree'de olup olmadığını tespit ediyor, ikincisi ise `encode-iter`, iterative bir işlemde, tree'yi gezerek sembolü oluşturan bit dizisini hesaplıyor.
+
+    
+    (define (encode-symbol symbol tree)
+      (define (symbol-in-tree? symbol tree)
+        (accumulate (lambda (a b) (or a b)) #f
+                    (filter (lambda (s) (eq? s symbol)) (symbols tree))))
+      (define (encode-iter tree result)
+        (cond ((or (null? tree)
+                   (not (symbol-in-tree? symbol tree)))
+               (error "symbol is not in the tree -- ENCODE-SYMBOL" symbol))
+              ((and (leaf? tree) (eq? (symbol-leaf tree) symbol)) result)
+              ((symbol-in-tree? symbol (left-branch tree))
+               (encode-iter (left-branch tree) (cons 0 result)))
+              ((symbol-in-tree? symbol (right-branch tree))
+               (encode-iter (right-branch tree) (cons 1 result)))))
+      (reverse (encode-iter tree '())))
+
+Burda eğer ağaç boşsa, veya sembolü içermiyorsa hata veriyoruz, diğer durmuda ağacı gezerek, sol dala gittiysek sonuca 0, sağ dala gittiysek sonuca 1 ekliyoruz.
+
+## 2.69
+
+Soruda biraz karışık olduğundan bahsetmiş ama bana epey kolay geldi. Ben genel olarak bu tür, `car` ve `cdr` ile gezilebilen bir veri yapısından tek bir değer bulmamız gereken durumlarda her zaman `reduce`(yani `accumulate`) kullanıyorum ama bu soruda elemanları 3lü olarak gezmemiz gerektiğinden kullanamadım:
+
+    
+    (define (successive-merge leaf-set)
+      (if (null? (cdr leaf-set))
+          (car leaf-set)
+          (successive-merge
+           (adjoin-set (make-code-tree (car leaf-set)
+                                       (cadr leaf-set))
+                       (cddr leaf-set)))))
+
+
+## 2.70
+
+    
+    (define huff1 (generate-huffman-tree '((a 2) (boom 1) (get 2) (job 2)
+                                           (na 16) (sha 3) (yip 9) (wah 1))))
+
+    > (length (encode '(get a job sha na na na na na na na na
+                    get a job sha na na na na na na na na
+                    wah yip yip yip yip yip yip yip yip yip) huff1))
+    75
+
+Sabit uzunlukta kodlar kullansaydık, 8 sembolü şifrelemek için 3 bite ihtiyaç duyacaktık. Bu durumda 34 sembollük bu cümleyi şifrelemek için `34 * 3 = 102 bit` kullanmamız gerekecekti.
+
+## 2.71
+
+Bu durumda, en sık geçen sembolün frekans `2^(n-1)` olurken, diğer tüm sembollerin frekansının toplamı `2^(n-1)-1` olacağından, en sık geçen sembol her zaman 1 bit ile gösterilecek(birkaç huffman tree çizip gözlemlerseniz, frekansı birbirleriyle aynı olan semboller aynı sayıda bit ile gösteriliyorlar). 
+
+En az geçen sembol ise `n-1` bir ile gösterilecek. Sebebi, en az sıklıkla kullanılan 2 bit hariç tüm bitlerin birbirlerinden farklı sayıda bitlerle gösterilecek olması(ispatlarla aram iyi değil, birkaç tree çizerek çok rahat gözlemlenebilir hehe).
+
+
+## 2.72
+
+2.68 için yazdığım fonksiyonda, her adımda, aradığımız sembol bulunduğumuz ağaçda var mı diye O(n)'de kontrol yapıyorum. Eğer varsa, ilk önce sol dala bakıyorum, bu dallar yine tree ise, aynı şekilde aradığım sembolü kontrol edip alt dallara geçiyorum.
+
+Şöyle düşünelim, aradığımızın sembolün ağaçta oldup olmadığını bulmak anlık olsun. Bu durumda `O(lgN)`de sembolü şifreleyebiliriz aslında. Tree üzerinde arama yapmaktan bir farkı kalmaz. Bu `lgN` adımın her birinde, lineer zamanda bir arama yaptığımdan(ilk paragrafta anlatıtğım olay), O(N*lgN) gibi birşey düşünebiliriz. Tabii burda N, her bir alt dalda azalıyor. Azalma miktar 1(diğer dalda tek bir sembol varsa) veya N / 2 olabilir(aynı frekansa sahip iki dala ayrılıyorsa). En kötü durumu hesapladığımıza göre, tüm sembollerin frekanslarının farklı olduğunu düşünebiliriz(bu şekilde en derin ağacı elde ederiz). Bu durumda, her bir alt dalda arama yapacağım sembol listesi 1 azalacaktır. Dolayısıyla en alt dala kadar arama yaptığım durumda, her bir seviyede `O(N)`, `O(N-1)`, `O(N-2)` ... `O(N * (N - 1) / 2)`, yani `O(N^2)` yani O(N^2 * lnN) toplamda. Buna da O(N^2) diyebiliriz sanırım(aslında burda lnN kısmı yanış oldu zaten, en kötü durumda ağacımızda her bir alt dalda sadece 1 eleman elemiş olacağımızdan, ağacda arama işlemi de aslında O(N) olmuş oluyor, aynı düzensiz listede arama gibi, bu durumda zaten O(N^2) olduğu kolayca görülebilir).
