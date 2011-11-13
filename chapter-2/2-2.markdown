@@ -382,7 +382,73 @@ Burdaki `filter` biraz garip oldu gibi, ama şu an için daha iyi bir çözüm g
 
 ## Ex 2.42
 
-TODO 8 queens
+Bu soru ilk başlarda çok kafamı karıştırdı, SICP'in bizden beklediği çözüm en basit çözüm değil gibi. SICP'deki koda bakarak veriyi nasıl tutmamız benleniyor anlayamadım. Yapabileceğim en basit çözümü yapmaya çalıştım.
+
+Öncelikle `safe?` fonksiyonundan başlayalım. Ben tüm tahtayı şöyle bir liste olarak tuttum, listenin ilk elemanı, 3 ise, ilk sütundaki taş 3. satırda anlamına gelecek şekilde. Örneğin şöyle bir tahta olabilir:
+
+    (1 4 8 1 3 4 7 2)
+
+Bu problemimiz için geçerli bir durum değil, birbirini tehdit eden bir sürü vezir var. Benim tahtayı tutuş şeklimi göstermek için koydum. İlk elemanı 1, ilk satırın ilk sütununda vezir var demek.
+
+    (define (safe? new-queen-col positions)
+      (define (safe-iter queen-cols queen-rows)
+        (if (or (null? queen-cols) (null? queen-rows)) #t
+            (let ((queen-col (car queen-cols))
+                  (queen-row (car queen-rows)))
+              (cond ((= queen-col new-queen-col) #f)
+                    ((< queen-col new-queen-col)
+                     (if (= (+ queen-col queen-row) new-queen-col)
+                         #f
+                         (safe-iter (cdr queen-cols) (cdr queen-rows))))
+                    ((> queen-col new-queen-col)
+                     (if (= (- queen-col queen-row) new-queen-col)
+                         #f
+                         (safe-iter (cdr queen-cols) (cdr queen-rows))))))))
+      (safe-iter positions (reverse (enumerate-interval 1 (length positions)))))
+
+
+Bir vezir 3 durumda tehdit ediliyor olabilir, ya kendisiyle aynı satırda başka bir vezir vardır, ya kendinden `n` sütun önceki vezir, eğer kendinden daha yukarıdaysa(satır olarak), o vezirin bulunduğu satır numarası + n, vezirimizin bulunduğu satır numarasın eşittir, eğer daha aşağıdaysa, o vezirin bulunduğu satır numarası - n vezirimizin bulunduğu satır numarasına eşittir.
+
+`(reverse (enumerate-interval 1 len))` bize kezdiğimiz her vezir için, o vezirle son eklediğimiz vezir arasındaki sütun sayısı farkını veriyor. `positions`da o ana kadar eklediğimiz vezirlerin satır numaraları. Teker teker tüm vezirleri gezerek, önceki paragrafta bahsettiğim kontrolleri yapıyorum. Daha iyi anlaşılması için nasıl çalıştığını göstereyim:
+
+    > (safe? 3 '(1 2))
+    #f
+    > (safe? 2 '(1 2))
+    #f
+    > (safe? 4 '(1 1 1))
+    #f
+    > (safe? 3 '(2 4 1))
+    #t
+    > (safe? 1 '(2 4 1))
+    #f
+    > (let ((positions '(1 3 6 1 8 7)))
+        (map (lambda (p) (safe? p positions))
+             (enumerate-interval 1 8)))
+    (#f #f #f #f #t #f #f #f) ;; sadece 5 guvenli
+
+Benim tahtayı tutuş şeklime göre, `adjoin-position` da şöyle olmalı(ne halta yaradığını anlamadığım `k` parametresi yok yani):
+
+    (define (adjoin-position new-row rest-of-queens)
+      (append rest-of-queens (list new-row)))
+
+
+Ve son olarak SICP'in bizden beklediğinden daha basit olduğunu düşündüğüm kendi çözümüm:
+
+    (define (queens board-size)
+      (define (iter-queens boards)
+        (if (= (length (car boards)) board-size)
+            boards
+            (iter-queens
+             (flatmap (lambda (queens)
+                        (map (lambda (new-queen)
+                               (adjoin-position new-queen queens))
+                             (filter (lambda (new-queen)
+                                       (safe? new-queen queens))
+                                     (enumerate-interval 1 8)))) boards))))
+      (iter-queens (list empty-board)))
+
+
+Kitabın bize verdiği şekilde yazmayı bir türlü beceremedim. Fonksiyonun nasıl çalştığını anlmaak için, en içerdeki expressiondan başlayarak dışarı çıka çıka testler yapılabilir.
 
 ## Ex 2.43
 
