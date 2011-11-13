@@ -1,0 +1,91 @@
+Bu bölüm biraz garip, hayali `put` ve `get` fonksiyonları ile çalışmak epey zor. StackOverflow'da birisi en azından bu bölümdeki alıştırmalar için çalışan `put` ve `get` fonksiyonları yazmış, [şurda](http://stackoverflow.com/questions/5499005/how-do-i-get-the-functions-put-and-get-in-sicp-scheme-exercise-2-78-and-on) görebilirsiniz.
+
+Ben ilk başta kendi fonksiyonlarımı yazmıştım, fakat Racket tam olarak Scheme değilmiş aslında ve bazı kısımlar farklı çalışıyormuş, pairlar immutablemış falan filan. Neyse işte, StackOverflow'daki çözüm idare ediyor.
+
+## 2.73
+
+
+a) `number?` ve `same-variable?` da bunu yapamamamızın sebebi, sayılarda ve değişkenlerde(sembollerde) bir `type tag` tutmuyoruz. Scheme'in kendi sembollerini ve sayılarını kullanıyoruz. Eğer Scheme tüm numaraları `('number 12)` şeklinde tutuyor olsaydı, `type-tag` ile type'ı öğrenip, dispatch yapabilirdik.
+
+Aslında bunu `type-tag` fonksiyonunun kendi içine birkaç test koyarak yapabiliriz. Şöyle birşey mesela:
+
+    
+    (define (type-tag datum)
+      (cond ((pair? datum) (car datum))
+            ((number? datum) 'number)
+            ((symbol? datum) 'symbol)
+            ...
+            ))
+
+b ve c) Kitapdaki örnekten bir farkı yok:
+
+    
+    (define (install-deriv-package)
+
+      ;; addend, augend, multiplicand vs. eski
+      ;; fonksiyonlarin aynisi buraya bir
+      ;; daha yazmadim
+      
+      (define (deriv-sum exp)
+        (make-sum (deriv (addend exp))
+                  (deriv (augend exp))))
+      (define (deriv-product exp)
+        (make-sum
+         (make-product (multiplier exp)
+                       (deriv (multiplicand exp) var))
+         (make-product (deriv (multiplier exp) var)
+                       (multiplicand exp))))
+      (define (deriv-exp exp var)
+        (if (same-variable? (base exp) var)
+            (make-product (exponent exp)
+                          (make-exponentiation (base exp)
+                                               (- (exponent exp) 1)))
+            0))
+
+      (put 'deriv '+ deriv-sum)
+      (put 'deriv '* deriv-product)
+      (put 'deriv '** deriv-exp)
+      'done)
+
+
+d) Soruyu yanlış anlamadıysam, hiçbir şey değişmezdi, sadece bir fonksiyonun parametre sırası değişmiş olacak.
+
+## 2.74
+
+Garip bir bölümden garip bir soru daha. Önce varsaydığımız `put` ve `get` fonksiyonları, şimdi komple bir sistem.
+
+Şimdi, her bir bölümün kayıt dosyasını tutuş şeklide, ve kayıtların tutulduğu veri tabanı farklı. Öncelikle bize kayıt dosyasından kaydın nasıl tutulduğunu anlayan fonksiyonlar gerekecek(aynı `type-tag` gibi). Daha sonra her bir bölüm için, o bölümün veri yapısından bize kayıt bilgilerini(`address`, `salary` vs.) verecek fonksyonlara ihtiyacımız var. Bu aşamadan sonra bölüme göre gerekli getter fonksiyonlarını çağıracak bir dispatch mekanizması kuracağız(ben kurmayacağım aslında eahueah).
+
+Ya da şöyle yapalım, daha önce hazırladığımız kompleks sayı sistemini düşünelim. Burda iki farklı implementasyon kullanabiliyorduk. Bu farklı implementasyonlar burda farklı bölümlerin dosyayı tutuş şekli olacak. Bu iki farklı implementasyon için de çalışan `selector` fonksiyonlarımız vardı. Bunlar da yine aynı şekilde selector fonksiyonlarımıza denk. Böyle işte. Kompleks sayı sistemimizi değiştirerek çözebiliriz tüm problemi.
+
+Bu garip soruyu atlıyorum izninizle(üzdün beni SICP).
+
+
+## 2.75
+
+"Closures are a poor man's object." :P
+
+    
+    (define (make-from-mag-ang mag ang)
+      (define (dispatch op)
+        (cond ((eq? op 'real-part)
+               (* mag (cos ang)))
+              ((eq? op 'imag-part)
+               (* mag (sin ang)))
+              ((eq? op 'magnitude) mag)
+              ((eq? op 'angle) ang)
+              (else
+               (error "Unknown op -- MAKE-FROM-MAG-ANG" op))))
+      dispatch)
+
+## 2.76
+
+Explicit dispatch olayı epey kötü, yeni bir operator tanımladığında, tüm tipler için gerekli işlemler aynı fonksiyon içinde olmalı. Eğer farklı tiplerle farklı kişiler ilgileniyorsa, aynı fonksiyonların üzerinden farklı kişiler geçmeli. Yeni bir tip eklendiğinde ise, teker teker tüm operatorleri gezip yeni tip için gerekli işlemleri eklemek gerek.
+
+Data-directed style en tatlısı gibi. Tüm operatorler tiplere ait, isim çakışması tehlikesi yok, tipler birbirlerinden tamamen ayrı, eğer farklı tiplerle farklı insanlar ilgileniyorsa herhangi bir problem yok, yeni tip eklemek eski koda dokunmayı gerektirmiyor. Yeni operator eklendiğinde ise her tip kendini güncelleyecek.
+
+Message passing biraz explicit dispatchin aynısının biraz daha farklı ifade edilmişi.
+
+Yeni tip eklemek için en kolayı bariz bir şekilde data-directed style. Bu şekilde, yeni bir tip eklemek istediğimizde eski kodlara hiç dokunmayacağız. Diğer iki yöntemde bir sürü değişiklik yapmak gerekecekti.
+
+Yeni operator eklemek hepsinde aynı zorluk aslında, tüm tipler için teker teker operatorler tanımlanmalı.
