@@ -1,0 +1,495 @@
+## 2.77
+
+`apply-generic` gözümüzün önünde dursun:
+
+    
+    (define (apply-generic op . args)
+      (let ((type-tags (map type-tag args)))
+        (let ((proc (get op type-tags)))
+          (if proc
+              (apply proc (map contents args))
+              (error
+                "No method for these types -- APPLY-GENERIC"
+                (list op type-tags))))))
+
+Z'de şöyle birşey:
+
+    
+    > (define z (cons 'complex (cons 'rectangular (cons 3 4))))
+    (complex rectangular 3 . 4)
+
+Bu aşamaya geldiğimizde, elimizde `rectangular` ve `polar` tipleri için dispatch fonksiyonları var, ama `complex` tipi için birşey yok. Generic fonksiyonlarımızdan biri olan `real-part`a bakalım:
+
+    
+    (define (real-part z) (apply-generic 'real-part z))
+
+
+`(real-part z)` çağırdıığmızda, `apply-generic` fonksiyonu, `complex` tipi için bir `real-part` fonksiyonu arıyor ama bulamıyor. Dolayısıyla hata alıyoruz.
+
+    
+    (put 'real-part '(complex) real-part)
+    (put 'imag-part '(complex) imag-part)
+    (put 'magnitude '(complex) magnitude)
+    (put 'angle '(complex) angle)
+
+Bu şekilde `complex` tipi için de generic fonksiyonları ekliyoruz. Burda olay şu, type-tagimiz `complex` ise, o type-tag'i atıp, geriye kalan veri üzerinde yine aynı generic fonksiyonu çağırıyoruz. Bu sefer generic fonksiyonlarımız eskisi gibi çalışıyor(yapımız `('rectangular 3 . 4)` haline geliyor çünki). `apply-generic` toplamda 2 kere çağırılıyor yani.
+
+
+## 2.78
+
+Önceki alıştırmalarda bir yerde aklıma gelmişti bu, bahsetmiştim:
+
+    
+    (define (attach-tag type-tag contents)
+      (if (number? contents)
+          contents
+          (cons type-tag contents)))
+
+    (define (type-tag datum)
+      (cond ((pair? datum) (car datum))
+            ((number? datum) 'scheme-number)
+            (else (error "Bad tagged datum -- TYPE-TAG" datum))))
+      (if (pair? datum)
+          (car datum)
+          (error "Bad tagged datum -- TYPE-TAG" datum)))
+
+    (define (contents datum)
+      (cond ((number? datum) datum)
+            ((pair? datum) (cdr datum))
+            (else (error "Bad tagged datum -- CONTENTS" datum))))
+
+
+## 2.79
+
+    
+    (define (install-equ?)
+      (define (eq-num-num num1 num2)
+        (= num1 num2))
+      (define (eq-num-complex num complex)
+        (and (zero? (imag-part complex))
+             (= num (real-part complex))))
+      (define (eq-num-rat num rat)
+        (= (* num (denominator rat)) (numerator rat)))
+
+      (define (eq-complex-complex cmp1 cmp2)
+        (and (= (real-part cmp1) (real-part cmp2))
+             (= (imag-part cmp1) (imag-part cmp2))))
+
+      ;; seklinde gidecek iste
+
+     (put 'equ? '(num num) eq-num-num)
+     (put 'equ? '(num complex) eq-num-complex)
+     (put 'equ? '(num rat) eq-num-rat)
+     ;; geriye kalan fonksyionlar da bu sekilde eklenecek
+     ;; toplamda 9 fonksiyon olmasi lazim(parametre sirasi da
+     ;; farkettigi icin)
+     )
+
+
+## 2.80
+
+2.79'da yaptığımızdan bir farkı yok. Ben tiplerin kendi paketlerine atmak yerine yeni bir paket oluşturuyorum, daha kolay ve güzel oluyor bence.
+
+    
+    (define (install-=zero?)
+      (put '=zero? '(scheme-number)
+           (lambda (x) (zero? x)))
+      (put '=zero? '(complex)
+           (lambda (x) (and (zero? (real-part x)) (zero? (imag-part x)))))
+      (put '=zero? '(rat)
+           (lambda (x) (zero? (numerator rat)))))
+
+
+## 2.81
+
+Bu fonksiyonun sorunu şu; eğer `proc` bulunamazsa(aradığımız generic fonksiyon yoksa), fonksiyon t1'i t2'ye, veya t2'yi t1'e çevirmeye çalışacak. Bu ikisi aynı tipler olsa bile.
+
+a) Eğer örneğin iki `scheme-number` alan bir generic fonksiyonumuz yoksa ve `scheme-number->scheme-number` tarzı bir fonksiyon yazarsak, bu sefer sürekli aldığı parametreleri yine kendi tiplerine dönüştürecek, sonsuz bir döngüye girecek. Louis'in fonksiyonları birşeyi çözmüyor yani.
+
+b) Birşeyler yapılması gerek evet. Eğer tipler aynıysa ve hala aradığımız generic fonksiyonu bulamıyorsak bir hata mesajı verebiliriz mesela.
+
+c) Hata mesajı veridğimiz kısım için ayrı bir fonksiyon oluşturdum, kod tekrarını önlemek için. Tipler birbirlerinin aynısı ve generic bir fonksiyon yoksa da hata verelim:
+
+    
+    (define (apply-generic op . args)
+      (let ((type-tags (map type-tag args)))
+        (let ((proc (get op type-tags)))
+          (if proc
+              (apply proc (map contents args))
+              (if (= (length args) 2)
+                  (let ((type1 (car type-tags))
+                        (type2 (cadr type-tags))
+                        (a1 (car args))
+                        (a2 (cadr args))
+                        (err (lambda () (error "No method for these types"
+                                            (list op type-tags)))))
+                    (if (equal? type1 type2)
+                        (err)
+                        (let ((t1->t2 (get-coercion type1 type2))
+                              (t2->t2 (get-coercion type2 type1)))
+                          (cond (t1->t2
+                                 (apply-generic op (t1->t2 a1) a2))
+                                (t2->t1
+                                 (apply-generic op a1 (t2->t1 a2)))
+                                (else
+                                 (err))))))
+                    (err))))))
+
+## 2.82
+
+
+    
+    (define (apply-generic op . args)
+      (define (cast-all args arg-types)
+        (define (cast-iter args r) ;; later I realized it's not iterative
+          (if (null? args)
+              (reverse r)
+              (let ((cast-fun (get-coercion (type-tag (car args))
+                                            (car arg-types))))
+                (if (null? cast-fun)
+                    '()
+                    (cons (cast-fun (car args)) r)))))
+        (if (null? arg-types)
+            '()
+            (let ((casted-types (cast-all (car arg-types)
+                                          args '())))
+              (if (and (not (null? casted-types))
+                       (get op (map type-tag casted-types)))
+                  casted-types
+                  (cast-all args (cdr type-tags))))))
+      (let ((type-tags (map type-tag args)))
+        (let ((proc (get op type-tags)))
+          (if proc
+              (apply proc (map contents args))
+              (let ((casted-list (cast-all args arg-types)))
+                (if casted-list
+                    (apply (get op casted-list) casted-list)
+                    (error "No method for these types"
+                           (list op type-tags))))))))
+
+
+Şu şekilde çalışıyor; `cast-all` fonksiyonu, `args` parametresindeki tüm elemanları `arg-types` parametresindeki ilk elemana dönüştürmeye çalışıyor, eğer dönüştürebilir ve bu yeni parametreler için generic bir fonksiyonumuz varsa, bu yeni tipleri dönüyor, yoksa, bu sefer `arg-types`daki ikinci elemana dönüştürmeye çalışıyor hepsini. Daha sonra `apply-generic`, eğer yeni `cast-all` yeni bir liste dönüyorsa, gerekli generic fonksiyonu çağırıyor, eğer dönemiyorsa, o zaman nasıl dönüştürürse dönüştürsün, bir generic fonksiyonumuz yok demektir, hata veriyor.
+
+Bu yöntemde şöyle bir problem var, diyelim ki biz `scheme-number` ve `rational` parametrelerle bir generic fonksiyon çağırdık, bu durumda parametreleri bu iki tipe dönüştürmeye çalışacak, ama örneğin `complex`e dönüştürmeye çalışmayacak. Halbuki elimizde birden fazla `complex` alan bir fonksiyon olabilir.
+
+## 2.83
+
+Bu şey beni feci halde baydı. 80 alıştırma önce tanımladığımız fonksiyonları hatırlayamıyorum valla. Biraz sallama olacak o yüzden ama ana fikir bu yani:
+
+    
+    (define (install-raise)
+      (put 'raise '(integer)
+           (lambda (x) (make-rat x 1)))
+      (put 'raise '(rational)
+           (lambda (x) (make-real ..) ;; boyle bir fonksiyon yoktu galiba?
+                                 ;; neyse ana fikir bu yani
+              ))
+      (put 'raise '(real)
+           (lambda (x) (make-from-real-imag real 0))))
+
+
+## 2.84
+
+Öncelikle `type-tower`ımızı ve bize istediğimizin tipin bir üst tipini verecek fonksiyonumuzu hazırlayalım:
+
+    
+    (define type-tower (list 'integer 'rational 'real 'complex))
+
+    (define (upper-type type type-list)
+      (cond ((null? type-list) #f)
+            ((equal? type (car type-list))
+             (and (not (null? (cdr type-list))) (cadr type-list)))
+            (else (upper-type type (cdr type-list)))))
+
+    (define (highest-type type-list tower)
+      (define (tower-reversed type-list tower)
+        (if (not (null? (filter (lambda (x) (equal? (car tower) x))
+                                type-list)))
+            (car tower)
+            (tower-reversed type-list (cdr tower))))
+      (tower-reversed type-list (reverse tower)))
+
+Bu şekilde, eğer kulemize yeni bir tip eklenirse bile sorun olmayacak. `apply-generic` içinde bir `cast-all` tanımladım, bu tüm parametreleri ortak bir tipe dönüştürüyor(hata kontrolü yapmadım, gerekli dönüşüm fonksiyonlarının olduğunu varsaydım)
+
+    
+    (define (apply-generic op . args)
+      (define (cast-all type args)
+        (map (lambda (arg) ((get-coercion (type-tag arg) type) arg))
+             args))
+      (let ((type-tags (map type-tag args)))
+        (let ((highest-type (highest-type type-tags type-tower)))
+          (let ((casted-types (cast-all highest-type args)))
+            (let ((proc (get op (map type-tag casted-types))))
+              (if proc
+                  (apply proc casted-types)
+                  (error "No method for these types")))))))
+
+## 2.85
+
+Reel sayılar için project fonksiyonu için internetten yardım almam gerekti. Scheme'in `rationalize` ve `inexact->exact` fonksiyonları gerekti.
+
+    (define (install-project)
+      (put 'project '(complex)
+           (lambda (x) (make-real (real-part complex))))
+      (put 'project '(real)
+           (lambda (x)  
+             (let ((rat (rationalize  
+                         (inexact->exact x) 1/100))) 
+               (make-rational 
+                (numerator rat) 
+                (denominator rat)))))
+      (put 'project '(rational)
+           (lambda (x)
+             (make-scheme-number (round (/ (numerator x)
+                                           (denominator x)))))))
+
+Drop fonksiyonu şu şekilde, bundan sonra `apply-generic`de yapmamız gereken tek değişiklik, sonucu döndüğümüz expression'ı `(drop ..)` ile çevrelemek.
+
+    (define (drop x) 
+      (let ((project-proc (get 'project (type-tag x)))) 
+        (if project-proc 
+          (let ((project-number (project-proc (contents x)))) 
+            (if (equ? project-number (raise project-number)) 
+              (drop project-number) 
+              x)) 
+          x))) 
+
+
+## 2.86
+
+
+Constructorlarımızda birşey değişmeyecek aslında. Selector fonksiyonlarımız artık duruma göre rasyonel bir sayıyla veya `scheme-number` yapacak.
+
+Bu soruda benim anlamadığım, neden rasyonel sayılar veya normal sayılar için farklı sin ve cos fonksiyonlarına ihtiyaç duyacağımız? Ne demeye çalışmış acaba? Neyse, eğer ihtiyaç duyuyorsak, selector ve constructor fonksiyonlarıyla hiç işimiz yok, sadece generic `sine`, `cose` ve `arctan` fonksiyonları tanımlamamız gerek. 
+
+---------------------------------------------------------------------------------------------
+
+Bu bölüme başlamadan önce biraz ara vermiştim, önceki kodları da düzenli tutmuyordum, çok problem oldu. Çözümleri tekrar bulup çalıştırmam, fonksiyonları bir daha tanımlamam falan gerekti. Ders olsun bir dahaki bölümde düzenli tutacağım.
+
+Bu arada benim gibi bu bölümden önce ara verdiyseniz ve bazı fonksiyonların nasıl çalıştığını anlamakta güçlük çekiyorsanız diye, bazı tanımlamaları bir daha vereyim:
+
+
+    (define (apply-generic op . args)
+      (let ((type-tags (map type-tag args)))
+        (let ((proc (get op type-tags)))
+          (if proc
+              (apply proc (map contents args))
+              (if (= (length args) 2)
+                  (let ((type1 (car type-tags))
+                        (type2 (cadr type-tags))
+                        (a1 (car args))
+                        (a2 (cadr args)))
+                    (let ((t1->t2 (get-coercion type1 type2))
+                          (t2->t1 (get-coercion type2 type1)))
+                      (cond (t1->t2
+                             (apply-generic op (t1->t2 a1) a2))
+                            (t2->t1
+                             (apply-generic op a1 (t2->t1 a2)))
+                            (else
+                             (error "No method for these types"
+                                    (list op type-tags))))))
+                  (error "No method for these types"
+                         (list op type-tags)))))))
+
+
+    (define (add x y) (apply-generic 'add x y))
+    (define (sub x y) (apply-generic 'sub x y))
+    (define (negation x) (apply-generic 'negation x))
+    (define (mul x y) (apply-generic 'mul x y))
+    (define (div x y) (apply-generic 'div x y))
+    (define (equ? x y) (apply-generic 'equ? x y))
+    (define (=zero? x) (apply-generic '=zero? x))
+
+İlk alıştırmaya kadar kitapdaki kodu da bir araya getirelim şöyle, bunun üzerinde çalışacağız:
+
+    (define (install-polynomial-package)
+      (define (variable? x) (symbol? x))
+
+      (define (same-variable? v1 v2)
+        (and (variable? v1) (variable? v2) (eq? v1 v2)))
+
+      (define (make-poly variable term-list)
+        (cons variable term-list))
+
+      (define (variable p) (car p))
+
+      (define (term-list p) (cdr p))
+
+      (define (adjoin-term term term-list)
+        (if (=zero? (coeff term))
+            term-list
+            (cons term term-list)))
+
+      (define (the-empty-termlist) '())
+      (define (first-term term-list) (car term-list))
+      (define (rest-terms term-list) (cdr term-list))
+      (define (empty-termlist? term-list) (null? term-list))
+      (define (make-term order coeff) (list order coeff))
+      (define (order term) (car term))
+      (define (coeff term) (cadr term))
+
+      (define (add-terms L1 L2)
+        (cond ((empty-termlist? L1) L2)
+              ((empty-termlist? L2) L1)
+              (else
+               (let ((t1 (first-term L1)) (t2 (first-term L2)))
+                 (cond ((> (order t1) (order t2))
+                        (adjoin-term
+                         t1 (add-terms (rest-terms L1) L2)))
+                       ((< (order t1) (order t2))
+                        (adjoin-term
+                         t2 (add-terms L1 (rest-terms L2))))
+                       (else
+                        (adjoin-term
+                         (make-term (order t1)
+                                    (add (coeff t1) (coeff t2)))
+                         (add-terms (rest-terms L1)
+                                    (rest-terms L2)))))))))
+
+      (define (mul-terms L1 L2)
+        (if (empty-termlist? L1)
+            (the-empty-termlist)
+            (add-terms (mul-term-by-all-terms (first-term L1) L2)
+                       (mul-terms (rest-terms L1) L2))))
+
+      (define (mul-term-by-all-terms t1 L)
+        (if (empty-termlist? L)
+            (the-empty-termlist)
+            (let ((t2 (first-term L)))
+              (adjoin-term
+               (make-term (+ (order t1) (order t2))
+                          (mul (coeff t1) (coeff t2)))
+               (mul-term-by-all-terms t1 (rest-terms L))))))
+
+      (define (add-poly p1 p2)
+        (if (same-variable? (variable p1) (variable p2))
+            (make-poly (variable p1)
+                       (add-terms (term-list p1)
+                                  (term-list p2)))
+            (error "Polys not in same var -- ADD-POLY"
+                   (list p1 p2))))
+
+      (define (mul-poly p1 p2)
+        (if (same-variable? (variable p1) (variable p2))
+            (make-poly (variable p1)
+                       (mul-terms (term-list p1)
+                                  (term-list p2)))
+            (error "Polys not in same var -- MUL-POLY"
+                   (list p1 p2))))
+
+      (define (tag p) (attach-tag 'polynomial p))
+      (put 'add '(polynomial polynomial)
+        (lambda (p1 p2) (tag (add-poly p1 p2))))
+      (put 'mul '(polynomial polynomial)
+        (lambda (p1 p2) (tag (mul-poly p1 p2))))
+      (put 'make 'polynomial
+        (lambda (var terms) (tag (make-poly var terms))))
+      'done)
+
+(define (make-polynomial var terms)
+  ((get 'make 'polynomial) var terms))
+
+## 2.87
+
+Polinomun sıfır olması için ya hiç terimi olmamalı(`(empty-termlist? (term-list poly))`) ya da tüm katsayıları sıfır olmalı(tanımladığım iterative `check-terms-iter` fonksiyonu):
+
+    (define (=zero? poly)
+      (define (check-terms-iter term-list)
+        (if (zero? (first-term term-list))
+            (check-terms-iter (rest-terms term-list))
+            #f))
+      (if (empty-termlist? (term-list poly))
+          #t
+          (check-terms-iter (term-list poly))))
+
+## 2.88
+
+Bu soruya gelince farkettim, bende generic bir `add` fonksiyonu tanımlı değilmiş. `add-poly` bu halde çalışamaz(`(add (coeff t1) (coeff t2))` kısmına bakın, katsayılar `scheme-number` olduğunda bu kısım çalışmayacak). Onu da ekleyiverelim arada:
+
+    (put 'add '(scheme-number scheme-number)
+         (lambda (x y) (+ x y)))
+
+Generic çıkarma fonksiyonum:
+
+    (put 'sub '(scheme-number scheme-number)
+         (lambda (x y) (- x y)))
+
+Bu kısımlar tabii `scheme-number` paketine eklenecek. Polinomlar için çıkarma fonksiyonumuzu da polinom paketine ekleyeceğiz. Hazır elimizde `add-poly` varken, `sub-poly`i, ikinci polinomu -1 ile çarpıp `add-poly`yi kullanarak yazabiliriz. Yapmamız gereken generic bir `negate` fonksiyonu yazmak(generic yazmamızın sebebi, katsayılarımızın bir polinom veya `scheme-number` olabilmesi, bu iki durumu da tek bir fonksiyon ile halletmek istiyoruz, generic fonksiyonlarla recursive yapıları çözüyoruz):
+
+    ;; scheme-number paketine
+    (put 'negate '(scheme-number)
+         (lambda (x) (- x)))
+
+    ;; polynomial paketine
+    (define (negate-terms poly)
+      (define (negate-term-list term-list)
+        (if (empty-termlist? term-list)
+            (the-empty-termlist)
+            (adjoin-term (make-term (order (first-term term-list))
+                                    (- (coeff (first-term term-list))))
+                         (negate-term-list (rest-terms term-list)))))
+      (make-poly (variable poly) (negate-term-list (term-list poly))))
+
+    (define (sub-poly p1 p2)
+      (add-terms (term-list p1)
+                 (negate-terms (term-list p2))))
+
+    (put 'sub '(polynomial polynomial)
+         (lambda (p1 p2) (tag (sub-poly p1 p2))))
+
+
+## 2.89
+
+__Sonradan not:__ [SchemeWiki](http://community.schemewiki.org/?sicp-ex-2.89)'de çok daha az değişiklikle çözmüşler bu soruyu. Yaptığı şey, yine tüm terimler `(katsayı derece)` şeklinde tutmuş, ama bir polinum, 0'dan kendi mertebesine kadar tüm derecelere sahip(kaysayısı 0 veya değil), hile yapmış resmen :P
+
+Tasarımı değiştirmeye en yukarıdan başladım. Arayüz olarak paketimizi kullananlara `add`, `sub`, `mul` ve `make` fonksiyonları sunuyoruz. Teker teker bunları değiştirmeye başlayacağım, ve o sırada bu fonksiyonların kullandığı ve bizim kullanıcdan gizlediğimiz(`encapsulation`) tüm fonksiyonları yeniden düzenleyeceğim.
+
+`add` generic fonksiyonu `add-poly`yi çağıracak. `add-poly`'de `make-poly` ve `same-variable?` çağırılıyor, bunları değiştirmeye gerek yok ama `add-terms` epey değişecek.
+
+`add-terms`, `empty-termlist?`i çağırıyormuş, bunun değişmesine gerek yok. `add-terms`in yeni hali şöyle olacak:
+
+    (define (add-terms L1 L2)
+      (cond ((empty-termlist? L1) L2)
+            ((empty-termlist? L2) L1)
+            ((> (length L1) (length L2))
+             (adjoin-term (first-term L1)
+                          (add-terms (rest-terms L1)
+                                     L2)))
+            ((< (length L1) (length L2))
+             (adjoin-term (first-term L2)
+                          (add-terms L1
+                                     (rest-terms L2))))
+            (else
+             (adjoin-term (add (first-term L1) (first-term L2))
+                          (add-terms (rest-terms L1) (rest-terms L2))))))
+
+Burda yaptığım şey, terim sayısı fazla olan polinomun, terim sayıları eşit olana kadar, en büyük terimini toplama eklemek, daha sonra iki polinomun terimlerini toplamak. Burda birtek `adjoin-term`i değiştirmeliyiz:
+
+    (define (adjoin-term term term-list)
+      (cons term term-list))
+
+`sub-poly` için `negate-terms`i değiştirmemiz gerek:
+
+    (define (negate-terms poly)
+      (define (negate-term-list term-list)
+        (if (null? term-list)
+            (the-empty-termlist)
+            (adjoin-term (- (first-term term-list))
+                         (rest-terms term-list))))
+      (make-poly (variable poly) (negate-term-list (term-list poly))))
+
+`add-terms`de gerekli değişiklikleri yaptığımız için `mul-terms`de değişiklik yapmamıza gerek yok.
+
+`make-poly`de zaten aynı.
+
+
+## 2.90
+
+Yok artık ya. Çok uzun ve gereksiz bir soru bence. Ben yapmayacağım.
+
+Yapmamız beklenen şey, polinomlarımızı aynı complex sayılarda yaptığımız iki, 2 etiketle etiketleyeceğiz, birincisi polinom olduklarını belirten etiket, ikincisi de hangi implementasyonu kullandığımı belirten etiket. Sonra gelsin `apply-generic`ler..
+
+
+## 2.91
+
+TODO
