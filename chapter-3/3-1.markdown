@@ -1,0 +1,161 @@
+SICP süper! Kitabın bu bölümüne kadar tek bir atama işlemi yapmadık, yan etkili bir fonksiyon çağırmadık. Tüm programlarımız tamamen fonksiyoneldi. Ona rağmen bana hesaplama için gayet doğal bir yol gibi geldi ve bu bölüme geldiğimde artık kendimi bu şekilde programlamada çok rahat hissediyordum. SICP bize bu yolu öğretirken, fonksiyonel programlama olduğunu hiç söylemedi(ya da ben hatırlamıyorum), ve zamanı geldiğinde atama operatöründen bahsedip neden tehlikeli olduğundan bahsetti. Bizim programlamayı öğrenme şeklimiz ise tamamen zıttı, imperative programlamayla başlayıp, fonksiyonel programlamayı hiçbir zaman öğrenmiyoruz. Ancak yeterince meraklı olanlar bir şekilde kendi çabalarıyla öğreniyor. Kendimiz öğrendiğimizde bile hala imperative programlama daha doğal geliyor. En azından SICP'i okuyana kadar benim için durum böyleydi. SICP'den alıntı:
+
+    "In view of this, it is ironic that introductory programming is most often taught in a highly imperative style. This may be a vestige of a belief, common throughout the 1960s and 1970s, that programs that call procedures must inherently be less efficient than programs that perform assignments. (Steele (1977) debunks this argument.) Alternatively it may reflect a view that step-by-step assignment is easier for beginners to visualize than procedure call. Whatever the reason, it often saddles beginning programmers with ``should I set this variable before or after that one'' concerns that can complicate programming and obscure the important ideas."
+
+SICP'in odağı değil belki ama, fonksiyonel programlama için mükemmel bir kaynak olduğunu düşünüyorum şu anda.
+
+
+## 3.1
+
+    (define (make-accumulator init)
+      (lambda (acc)
+        (begin (set! init (+ init acc))
+               init)))
+
+## 3.2
+
+    (define (make-monitored f)
+      (let ((counter 0))
+        (lambda (input)
+          (cond ((eq? input 'how-many-calls?) counter)
+                ((eq? input 'reset-count) (set! counter 0))
+                (else (begin (set! counter (+ counter 1))
+                             (f input)))))))
+
+## 3.3
+
+    (define (make-account balance password)
+      (define (withdraw amount)
+        (if (>= balance amount)
+            (begin (set! balance (- balance amount))
+                   balance)
+            "Insufficent funds."))
+      (define (deposit amount)
+        (set! balance (+ balance amount))
+        balance)
+      (define (dispatch p m)
+        (if (eq? p password)
+            (cond ((eq? m 'withdraw) withdraw)
+                  ((eq? m 'deposit) deposit)
+                  (else (error "Unknows requeest -- MAKE-ACCOUNT"
+                               m)))
+            (lambda (x) "Incorrect password")))
+      dispatch)
+
+## 3.4
+
+    (define (make-account balance password)
+      (let ((consecutive-fails 0))
+        (define (withdraw amount)
+          (if (>= balance amount)
+              (begin (set! balance (- balance amount))
+                     balance)
+              "Insufficent funds."))
+        (define (deposit amount)
+          (set! balance (+ balance amount))
+          balance)
+        (define (dispatch p m)
+          (if (eq? p password)
+              (begin (set! consecutive-fails 0)
+                     (cond ((eq? m 'withdraw) withdraw)
+                           ((eq? m 'deposit) deposit)
+                           (else (error "Unknows requeest -- MAKE-ACCOUNT"
+                                        m))))
+              (lambda (x) (begin (set! consecutive-fails (+ consecutive-fails 1))
+                            (if (= consecutive-fails 7)
+                                (call-the-cops)
+                                "Incorrect password"))))) ;; lol
+        dispatch))
+
+    (define (call-the-cops) "cops!!1")
+
+## 3.5
+
+Bu soru cümlesinde bir problem olduğunu düşünen bir ben miyim? Monte Carlo integration `estimate-integral` tanımlayın, bir predicate, sınırlar ve deneme sayısını alsın, yaklaşık sonucu versin diyor, sonra da fonksiyonunuz `monte-carlo`yu kullansın diyor? Bizden yazmamız beklenen fonksiyonla, kitapda verilen `monte-carlo` neredeyse aynı şey. Neyse kafam biraz iyi olabilir. Ben kitapdaki `monte-carlo` fonksiyonu yokmuş gibi çözüyorum.
+
+Öncelikle, kitapdaki `random-in-range` fonksiyonunu biraz değiştirmemiz gerek, Racket'daki `random` tam olarka kitapdaki gibi çalışmadığından(eğer parametresiz çağırırsak, 0-1 arası ondalıklı sayılar üretirken, parametre ile çağırırsak sadece tam sayılar üretiyor):
+
+    (define (random-in-range low high)
+      (let ((range (- high low)))
+        (+ low (* (random) range))))
+
+`estimate-integral`de şöyle birşey. Bundan sonra birim çemberden pi'yi şöyle hesaplıyoruz, -1 1 arasında bir x, yine -1 1 arasında bir y değeri oluşturup, bu x ve y değerlerinin (0, 0) noktasından uzunluğunun 1'den büyük olup olmadığına bakıyoruz. Büyükse dairemizin dışında, küçük veya eşitse içindedir.
+
+    (define (estimate-integral p x1 x2 y1 y2 trials)
+      (define (iter trials-remaining trials-passed)
+        (cond ((zero? trials-remaining)
+               (/ trials-passed trials))
+              ((p (random-in-range x1 x2) (random-in-range y1 y2))
+               (iter (- trials-remaining 1) (+ trials-passed 1)))
+              (else
+               (iter (- trials-remaining 1) trials-passed))))
+      (* (abs (* (- x2 x1) (- y2 y1))) (iter trials 0)))
+
+Bu da 3.14724 ediyor.
+
+
+## 3.6
+
+Burda bölümün başında bahsedilen `random-update` fonksiyonu kastediliyor sanırım. Ya da Scheme'in(veya Racket'in) benzer bir fonksiyonu var mı diye araştırılabilinir.
+
+    (define rand
+      (let ((x 0))
+        (lambda (s)
+          (cond ((eq? s 'generate)
+                 (begin (set! x (random-update x))
+                        x))
+                ((eq? s 'reset) (lambda (new-val)
+                                  (set! x new-val)))))))
+
+## 3.7
+
+İtiraf ediyorum, biraz kopya çektim. Schemewiki'ye baktım(yanlışlıkla). Ama çok kısa süreyle, bir satır gördüm, birden herşey anlam kazandı.
+
+Süper soru, çözmeden buraya bakıyorsanız lütfen bakmayın ve biraz daha uğraşın :). `make-account`a sadece `check-password` özelliği eklemem gerekti:
+
+
+    (define (make-account balance password)
+      (let ((consecutive-fails 0))
+        (define (withdraw amount)
+          (if (>= balance amount)
+              (begin (set! balance (- balance amount))
+                     balance)
+              "Insufficent funds."))
+        (define (deposit amount)
+          (set! balance (+ balance amount))
+          balance)
+        (define (dispatch p m)
+          (cond ((eq? m 'check-password)
+                 (eq? p password))
+                ((eq? p password)
+                 (begin (set! consecutive-fails 0)
+                        (cond ((eq? m 'withdraw) withdraw)
+                              ((eq? m 'deposit) deposit)
+                              (else (error "Unknows requeest -- MAKE-ACCOUNT"
+                                           m)))))
+                (else
+                 (begin (set! consecutive-fails (+ consecutive-fails 1))
+                        (if (= consecutive-fails 7)
+                            (call-the-cops)
+                            "Incorrect password")))))
+        dispatch))
+
+    (define (make-joint acc old-pass new-pass)
+      (if (acc old-pass 'check-password)
+          (lambda (p m) (if (eq? p new-pass)
+                       (acc old-pass m)
+                       (error "Wrong password -- MAKE-JOINT")))
+          (error "Wong password -- MAKE-JOINT")))
+
+
+## 3.8
+
+Benim burdak aklıma gelen çözüm şu oldu: fonksiyonumuz ilk çağırıldığında 0, ondan sonra her çağırıldığında bir önceki çağırıldığı değeri dönsün:
+
+    (define f (let ((last-val 0))
+                (lambda (val)
+                  (let ((return-val last-val))
+                    (set! last-val val)
+                    return-val))))
+
+Bu soruyu da sevdim bak.
