@@ -1,0 +1,85 @@
+Bu bölüm kısa ama çok önemli. Closure'ların ve lexical scope'un nasıl çalıştığı bu bölümde anlatılıyor, ve 4. bölümde yazacağımız yorumlayıcı için bu bölüm şart. Bu bölümü anlamadan mutable data içeren hiçbir fonksiyonun çalıştırılışını yorumlayamayız.
+
+Bu bölümdeki sorular kod yazmamızı gerektirmediğinden, sözel olarak açıklamaya çalışacağım. Çizim yapmamız gereken yerleri bir şekilde açıklamaya çalıştım.
+
+__bu arada not: birşeyi daha iyi anlamak için öğretin falan geyiği vardır ya, ne kadar doğru birşey yahu! bu bölümü bu açıklamaları yazarken öğrendim.__
+
+__çizimler için şöyle kolay bir program tavsiyesinde bulunan olursa çizip eklemek isterim aslında__
+
+## 3.9
+
+Global envde factorial ismi, bir fonksiyon nesnesini gösterecek, bu fonksiyonun frame olarak bu global envi gösterecek. İlk fonksiyona bakalım:
+
+    (define (factorial n)
+      (if (= n 1)
+          1
+          (* n (factorial (- n 1)))))
+
+`(factorial 6)` çalıştırıldığında, n'in 6 olduğu bir frame oluşturulup fonksiyon içi bu ortamda çalıştırılacak, ve `(factorial 5)` çalıştırılacak. Bunun için de bu sefer n'in 5 olduğu bir frame oluşturulup bu ortamda aynı şeyler yapılacak, `(factorial 1)` çağırılana kadar. Toplam 6 frame oluşturulacak, ve bir şekilde fonksiyonların dönüş değerleri birbirlerine aktarılacak(bu olay bu kısımda anlatılmıyor).
+
+İkinci fonksiyon:
+
+    (define (factorial n)
+      (fact-iter 1 1 n))
+    (define (fact-iter product counter max-count)
+      (if (> counter max-count)
+          product
+          (fact-iter (* counter product)
+                     (+ counter 1)
+                     max-count)))
+
+`(factorial 6)` çağırıldığında yine aynı şekilde n'in 6 olduğu bir frame oluşturulup bu ortamda fonksiyon çalıştırılacak ve `(fact-iter 1 1 6)` çalıştırılacak. Yine bir frame, product 1, counter 1 ve max-count 6 olacak şekilde. İçersinde `fact-iter` fonksiyonu çalıştırılacak, ve yine 6 kere `fact-iter` çalıştırılacak, toplam 7 frame.
+
+
+## 3.10
+
+Madem `let` sadece syntactic sugar, biz onun yerine direkt `lambda`yı yazalım, olayı daha net görebiliriz.
+
+
+    (define (make-withdraw initial-amount)
+      ((lambda (balance)
+         (lambda (amount)
+           (if (>= balance amount)
+               (begin (set! balance (- balance amount))
+                      balance)
+               "Insufficient funds"))) initial-amount))
+
+
+`(define W1 (make-withdraw 100))` çalıştırıldığında, `initial-amount`un 100 olduğu bir frame oluşturulup `make-withdraw` bu ortamda çalıştırılacak. `make-withdraw` çalıştığında hemen bir fonksiyon nesnesi daha oluşturulacak(ilk lambda), ve `balance`ın `initial-amount`, yani 100 olduğu bir framede çalıştırılacak. Bu fonksiyon bir fonksiyon nesnesi döndürecek, *buraya dikkat*, fonksiyonlar oluşturulduklarında oluşturuldukları ortama bir pointer tutuyorlardı, gereken sembolleri eğer kendi içlerinde tanımlı değilse, bir üst ortamda(kendi tanımlandıkları ortam) aramak için, o yüzden bu ilk lambda çalıştırıldığında oluşturulan frame'e bir pointer tutacak bu içerdeki lambda. Dolayısıyla o frame, `make-withdraw` fonksiyonundan sonra kaybolmayacak(buna closure diyebilir miyiz?). Ve bu dönen lambda W1'e atanacak(bind). (biraz karışık olduğunun farkındayım ama elimden gelen bu)
+
+`(W1 50)` çağıralım. W1, `make-withdraw`ın döndürdüğü en içerdeki lambda fonksiyonunu tutuyordu, ve bu lambda da çevre pointerı olarak, `balance`ı tutan bir env'i gösteriyordu(global env'i değil, dikkat, global env'i de bu lambda'nın gösterdiği env tutuyor) ve fonksiyon şu şekildeydi:
+
+
+    (lambda (amount)
+      (if (>= balance amount)
+          (begin (set! balance (- balance amount))
+                 balance)
+          "Insufficient funds"))
+
+`(W1 50)` çağırıldığında, `amount`'un 50 olduğu bir frame oluşturulup bu ortamda çalıştırılıyor, `(set! balance (- balance amount))` çalıştırılırken, balance global env'de değil, `make-withdraw`ı ilk çağırdığımızda çağırılan ilk lambda ile oluşturulan env'de aranıyor.
+
+işte böyle. Son olarak, bir daha `(define W2 (make-withdraw 100))` çağırıldığında heşey aynı, sadece W2 için yeni bir fonksiyon nesnesi oluşturulmuyor da, farklı bir frame'i gösteren ama aynı gövdeye(function body, eauheah) sahip bir nesne oluşturuluyor.
+
+
+## 3.11
+
+Kod gözümüzün(gözümün, açıklarken daha kolay oluyor hehe) önünde dursun:
+
+    (define (make-account balance)
+      (define (withdraw amount)
+        (if (>= balance amount)
+            (begin (set! balance (- balance amount))
+                   balance)
+            "Insufficient funds"))
+      (define (deposit amount)
+        (set! balance (+ balance amount))
+        balance)
+      (define (dispatch m)
+        (cond ((eq? m 'withdraw) withdraw)
+              ((eq? m 'deposit) deposit)
+              (else (error "Unknown request -- MAKE-ACCOUNT"
+                           m))))
+      dispatch)
+
+
+Başlayalım çalıştırmaya, `(define acc (make-account 50))` çağırıldığında `balance`ın 50 olduğu bir frame oluşturuluyor, bu frame'de aynı zamanda `withdraw`, `deposit` ve `dispath` fonksiyonları var. Bu ortamda `make-account` çalıştırılıyor, ve aslında `make-account`un tek yaptığı `dispath`i dönmek. `dispath`de `make-account` çağırıldığında oluştururan frame'e ait olduğundan, gösterdiği env pointerı, `balance`ın 50 olduğu, `deposit`, `withdraw` ve `dispath` fonksyionlarının olduğu env'i gösteriyor. Gerisi aynı zaten.
