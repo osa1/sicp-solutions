@@ -1,0 +1,594 @@
+Recket(PLT Scheme, mzscheme, artık ne derseniz) Scheme'den bazı yerlerde ayrılıyor demiştik daha önceden, bir yer de burası işte. Racket'da cons-cell'ler immutable, dolayısıyla `set-car!`, `set-cdr!` gibi fonksiyonları yok. Fakat list, cons-cell, list gibi yapıların mutable hallerini de içeriyor aslında.
+
+    (require racket/mpair)
+
+Bu şekilde mutable pairları programımıza dağil ettikten sonra, SICP'de `cons` veya `list` gördüğümüz herde `mcons`, `mlist`, `set-car!`, `set-cdr!` gördüğümüz yerlerde de `set-mcar!`, `set-mcdr!` kullanıyoruz.
+
+Bu arada Racket'da mutable yapıların gösterilişi de {} ile yapılıyor, parantezlerle değil(ama yine de `(define x '{{a b} c d})` şeklide bir kullanım yok, neden Racket >.< )
+
+## 3.12
+
+Daha önce yaptığım gibi ascii karakterlerle box-and-pointer diagramları çizmeyeceğim, direkt olayı özetleyeyim:
+
+`(define w (append! x y))` kısmına kadar zaten bildiğimiz şeyler. Burda yaptığımız şey, X'in sonuna Y'yi eklemek, X'i değiştirerek, ve yeni sonucu w'ye atamak. Onun dışında aynı bildiğimiz şeyler işte.
+
+
+## 3.13
+
+Öncelikle, Racket ile çalışanlar için mutable listler için bir `last-mpair` yazalım:
+
+    (define (last-mpair x)
+      (if (null? (mcdr x))
+          x
+          (last-mpair (mcdr x))))
+
+`make-cycle`ı da bunu kullanarak yazmalıyız, immutable pairlarda zaten cycle falan yapamayız.
+
+    > (make-cycle x)
+    #0={a b c d . #0#}
+
+Süper. Racket bir cycle olduğunu farkedip bu şekilde gösteriyor. `(last-mpair x)` ise sonsuz döngüye giriyor ve hiçbir zaman sonlanmıyor(tail-call durumunda olduğu için stack overflow falan da almıyoruz, iterative bir işlem olarak çalışıyor).
+
+
+## 3.14
+
+Hehe buna benzer bir soru bir programlama sınavında çözmüştük diye hatırlıyorum. Listeyi ters çeviren bir fonksiyon. Bunu şu şekilde yapıyor, ilk başta `x`e ters çevireceğimiz listeyi, y`ye de boş bir liste vererek çağırıyoruz. x'in `cdr`ını, yeni x olarak vereceğimiz için `temp` olarak kaydedip, x'in ilk elemanına y'yi ekliyoruz. İlk başta `y` boş liste olduğundan, x sadece eski x'in ilk elemanı olmuş oluyor. Daha sonra `temp`i x, x'i de y yapıyoruz. Bu sefer x `(2 3)`, y ise `(1)` olmuş oluyor(ilk çağrımız `(mystery (mlist 1 2 3))` olsun). Aynı işlemleri yaptığımızda ilk önce `(2 1)`, sonra `(3 2 1)` oluyor y.
+
+
+## 3.15
+
+Ne diagrammış arkadaş! Geçiyorum(bu sorunun olayı şu, tüm `'wow`lar aynı `'wow`u göstermeli. Yani aynı semboller bellekte de aynı yerdeler, her seferinde yeni sembol oluşturulmuyor ve bu yüzde `eq?`, sembolün özellikleri(uzunluğu vs.) farketmeksizin çok hızlı çalışıyor, soru sanırım bunu anlayıp anlamadığımızı ölçmek için sorulmuş).
+
+## 3.16
+
+Racket kullananlar için önce Ben'in kodunu mutable pairlar için düzenleyelim:
+
+    (define (count-pairs x)
+      (if (not (mpair? x))
+          0
+          (+ (count-pairs (mcar x))
+             (count-pairs (mcdr x))
+             1)))
+
+Ben'in kodu şu yüzden yanlış, eğer bir `pair`ın `cdr`ı, başka bir pair'a bağlıysa ve bu bağlı olunan pair zaten sayılmışsa, bu pairı bir daha sayacağından cevabı yanlış olacak.
+
+    > (define x (mlist 1 2 3))
+    > (count-pairs x)
+    3
+    > (set-mcar! (mcdr x) (mcdr (mcdr x)))
+    > (count-pairs x)
+    4
+
+Burda yaptığımız şey, ikinci pairının carını, listenin 3. elemanına bağlamak. Listedeki toplam pair sayısı değişmemesine rağmen 4 sonucunu aldık(diagram çizilerek hata çok rahat görülebilir).
+
+    > (set-mcar! x (mcdr x))
+    7
+
+Bundan sonra bir de ilk pairın carını, ikinci elemana bağladık. İkinci elemandan sonra zaten hatalı olarak 3 tane pair sayıyor, bunu iki kere saydığımızda 6, bir de ilk elemanı sayıdığımızda 7 elde ediyoruz.
+
+
+Hiçbir sonuç elde edemememiz için de circle oluşturmamız lazım:
+
+    (set-mcdr! (last-mpair x) (mcar x))
+
+
+## 3.17
+
+Öncelikle 3.18'de de kullnacağım bir fonksiyon:
+
+    (define (pair-counted? pair counted-list)
+        (cond ((null? counted-list) #f)
+              ((eq? pair (car counted-list)) #t)
+              (else (pair-counted? pair (cdr counted-list)))))
+
+Yaptığı şey barizdir zaten, `counted-list`in içinde `pair`i arıyor. Bunu yaparken `eq?` kullanıyor. Bu kısımda `eq?` işin kilit noktası. Pair'ları pointer usulü karşılaştırıyor, yani içeriğinin aynı olması değil, sembollerin aynı pairı göstermesi gerek #t dönmesi için.
+
+    (define (count-pairs x)
+      (let ((counted-pairs '()))
+        (define (count-pairs-rec p)
+          (if (or (not (pair? p)) (pair-counted? p counted-pairs))
+              0
+              (begin (set! counted-pairs (cons p counted-pairs))
+                     (+ (count-pairs-iter (car p))
+                        (count-pairs-iter (cdr p))
+                        1))))
+        (count-pairs-rec x)))
+
+## 3.18
+
+Şimdi, Racket kullanıcılarına önceden yazdığımız `pair-counted?` fonksiyonunun mutable pairlar için olanı lazım. Yapmamız gereken tüm `car`ları `mcar` falan yapmak. Daha önceden de yaptığımız gibi. Cycle yapmak için de yine önceki alıştırmalardan birinde yazdığımız `make-cycle`ı kullanacağız.
+
+    (define (mcycle? x)
+      (define (cycle-iter x counted-list)
+        (cond ((null? x) #f)
+              ((not (mpair-counted? x counted-list))
+               (cycle-iter (mcdr x) (mcons x counted-list)))
+              (else ;; ayni paira bir daha geldik
+               #t)))
+      (cycle-iter x '()))
+
+İlk başka fonksiyon yanlış çalışacakmış gibi gelebilir, ama aslında gayet doğru çalışıyor. Şöyle düşünelim, listede dümdüz ilerliyoruz, `car`da başka bir liste de olsa farketmez, bizim tek bilmemiz gereken, dümdüz ilerlerken bir yerden sonra daha önceden geçtiğimiz bir paira geliyor muyuz? Eğer geliyorsak bir yerden sonra yine aynı cycle'dan aynı pair'a geleceğiz demektir. Pairların aynı olup olmadığını `eq?` ile tespit etmemiz çok kritik. Eğer başka türlü tespit etmeye kalkarsak, aynı elemanlarla karşılaştığımızda da cycle varmış gibi davranmış oluruz.
+
+## 3.19
+
+Ben bu soruya daha önce bir yerde denk gelmiştim, hiç heyecanlı olmadı o yüzden :P . Yaptığım şey, iki koldan listede ilerlemek, birisi iki eleman ileri giderken, birisi bir eleman ileri gidiyor. Eğer önden giden sona ulaşırsa, zaten cycle yok demektir. Eğer önden giden ve arkadan giden aynı pair'a gelirlerse, o zaman cycle var demektir:
+
+    (define (mcycle?2 x)
+      (define (cycle-iter p1 p2)
+        (cond ((null? p2) #f)
+              ((null? (mcdr p2)) #f)
+              ((eq? p1 p2) #t)
+              (else (cycle-iter (mcdr p1) (mcdr (mcdr p2))))))
+      (if (or (null? x)
+              (null? (mcdr x)))
+          #f
+          (cycle-iter x (mcdr (mcdr x)))))
+
+## 3.20
+
+Bir diagram çizme sorusu daha. Şöyle birşeyler yazayım ben de bari:
+
+3.11'e epey benziyor. `x` için, `x`in 1, `y`nin 2 olduğu ortamda `cons` fonksiyonu çağırılacak. Bu sırada oluşturulan frame'de, `set-x!` , `set-y!` ve `dispathc` fonksiyonları oluşturulacak, ve `dispatch` fonksiyonu dönülecek. `dispatch` fonksiyonundan, kendisinin oluşturulduğu frame'e bir pointer tutulacağından, `x`, `y` ve yardımcı fonksiyonlar kaybolmayacak ve `dispatch` içinden erişilebilinecek.
+
+
+## 3.21
+
+Ben usta implementasyonu anlamamış, çok zekice geldi bana. Queue'yi, bir pair şekliden tutuyoruz, `car`ı bir liste, eğer bir eleman silmek istersek, bu listeyi, kendisnin `cdr`ıyla değiştiriyoruz, böylece ilk eleman silinmiş oluyor. `cdr`ı ise bir pair, `car`ındaki listenin son elemanını tutuyor. Eğer queue'a bir eleman daha eklemek istersek, bu pair'ın `cdr`ına ekliyoruz, ve bu elemanı kendi `cdr`ıyla değiştiriyoruz. Zekice olan kısım, bu pair aynı zamanda queue yapımızın `car`ının son elemanı olduğundan, bunun `cdr`ını değiştirdiğimizde otomatik olarak queue`mize ekleme yapmış oluyoruz.
+
+İkinci olarak, queue'dan tüm elemanları sildiğimizde de son elemanın queue pairımızda gözükmesinin sebebi şu, ikinci eleman sadece ekleme yapma durumunda `cdr`ı değiştirilmek için kullanıyor, queue'nin o anda sahip olduğu elemanları tutmak için değil.
+
+    (define (print-queue queue)
+      (display (mcar queue)))
+
+Yani bu son kısım hayalgücümüze kalmış. Olayı bu neticede. Uğraşmak istemiyorum.
+
+## 3.22
+
+    (define (make-queue2)
+      (let ((front-ptr (mlist))
+            (rear-ptr (mlist)))
+        (define (empty-queue?)
+          (null? front-ptr))
+        (define (insert-queue! x)
+          (let ((new-pair (mcons x (mlist))))
+            (cond ((empty-queue?)
+                   (set! front-ptr new-pair)
+                   (set! rear-ptr new-pair))
+                  (else
+                   (set-mcdr! rear-ptr new-pair)
+                   (set! rear-ptr new-pair)))))
+        (define (delete-queue!)
+          (if (empty-queue?)
+              (error "DELETE! called with an empty queue"
+                     rear-queue)
+              (let ((e (mcar front-ptr)))
+                (set! front-ptr (mcdr front-ptr))
+                e)))
+        (define (print-queue)
+          (display front-ptr))
+        (define (dispatch m)
+          (cond ((eq? m 'insert-queue!)
+                 insert-queue!)
+                ((eq? m 'delete-queue!)
+                 delete-queue!)
+                ((eq? m 'print-queue)
+                 print-queue)
+                (else (error "ERROR - make-queue - dispatch"
+                             m))))
+        dispatch))
+
+
+## 3.23
+
+Aslında çok basit bir soru ama beni nedense çok zorladı. C ile bundan çok daha kompleks veri yapıları tasarlayan biri olarak Scheme implementasyonu çok zor geldi. İhtiyacımız olan şey bir double-linked list. Scheme'de bunu şu şekilde yapmayı düşündüm, dequedeki her bir eleman, bir `car`ı kendi değerini, `cdr`ı kendinden bir önceki pairı tutsun. Gerisi klasik double-linked list.
+
+    (define (make-deque)
+      (cons '() '()))
+
+    (define (front-ptr deque)
+      (car deque))
+
+    (define (rear-ptr deque)
+      (cdr deque))
+
+    (define (front-deque deque)
+      (if (empty-deque? deque)
+          '()
+          (car (front-ptr deque))))
+
+    (define (rear-deque deque)
+      (if (empty-deque? deque)
+          '()
+          (car (rear-ptr deque))))
+
+    (define (empty-deque? deque)
+      (or (null? (front-ptr deque))
+          (null? (rear-ptr deque))))
+      
+    (define (front-insert-deque! deque x)
+      (cond ((empty-deque? deque)
+             (set-car! deque (cons x '()))
+             (set-cdr! deque (car deque)))
+            (else
+             (set-car! deque (cons x (front-ptr deque))))))
+
+    (define (front-delete-deque! deque)
+      (if (empty-deque? deque) '()
+          (let ((e (front-deque deque)))
+            (set-car! deque (cdr (front-ptr deque)))
+            e)))
+
+    (define (rear-insert-deque! deque x)
+      (cond ((empty-deque? deque)
+             (front-insert-deque! deque x))
+            (else
+             (set-cdr! deque (cons x (rear-ptr deque))))))
+
+    (define (rear-delete-deque! deque)
+      (if (empty-deque? deque) '()
+          (let ((e (rear-deque deque)))
+            (set-cdr! deque (cdr (rear-ptr deque)))
+            (if (empty-deque? deque)
+                (set-car! deque '()))
+            e)))
+
+
+
+## 3.24 
+Küçük birkaç değişiklik yeterli olacak. `assoc` fonksiyonumuzun artık `eq?` kullanmasını istemediğimiz için değişiklik yapmamız gerekecek. Eşitlik testini `make-table`da parametre olarak alacağımızdan, `assoc` fonksiyonunu `make-table`ın içine alıp, aldığımız bu parametre ile karşılaştırma yaparsak direkt çözülecek:
+
+
+    (define (make-table equality-test)
+      (let ((local-table (mlist '*table*)))
+        (define (assoc key records) ;; assoc'u make-table'a aldim
+          (cond ((null? records) #f)
+                ;; karsilastirmalari da artık equality-test ile yapıyorum
+                ((equality-test key (mcar (mcar records))) (mcar records))
+                (else (assoc key (mcdr records)))))
+        (define (lookup key-1 key-2)
+          (let ((subtable (assoc key-1 (mcdr local-table))))
+            (if subtable
+                (let ((record (assoc key-2 (mcdr subtable))))
+                  (if record
+                      (mcdr record)
+                      #f))
+                #f)))
+        (define (insert! key-1 key-2 value)
+          (let ((subtable (assoc key-1 (mcdr local-table))))
+            (if subtable
+                (let ((record (assoc key-2 (mcdr subtable))))
+                  (if record
+                      (set-mcdr! record value)
+                      (set-mcdr! subtable
+                                 (mcons (mcons key-2 value)
+                                        (mcdr subtable)))))
+                (set-mcdr! local-table
+                           (mcons (mlist key-1
+                                         (mcons key-2 value))
+                                  (mcdr local-table)))))
+          'ok)
+        (define (dispatch m)
+          (cond ((eq? m 'lookup-proc) lookup)
+                ((eq? m 'insert-proc!) insert!)
+                (else (error "Unknown operation -- TABLE" m))))
+        dispatch))
+
+
+## 3.25
+
+Burda farketmemiz beklenen şey sanırım tabloların aslında recursive bir yapıya sahip olduğu. Örneğin 3 boyutlu bir tablo düşünelim, 3 tane anahtar alacağız, ilk anahtarı bulana kadar listede gezip, bulduğumuzda bunun alt listesinde 2. anahtarı arayacağız, bulursak bu sefer yine bunun alt listesinde 3. anahtar. Tekrar eden adımlar bariz.
+
+Bir de şu açıdan bakabiliriz(bir yandan da kendime açıklıyorum bu satırları yazarken hehe), en küçük tablo aslında her elemanı (key value) pairları olan bir liste. Burda `value` kısımları başka tablolar da olabilir, ki bu durumda 2 boyutlu tablo elde ediyoruz. Eğer bu ikinci tablonun da `value`ları tablolarsa 3 boyut falan oluyor.
+
+Adım adım gidelim. İlk başta olayı daha iyi anlayabilmek için 3.23. şeklide koda döktüm(Racket usulü mutable pairlarla):
+
+    (define t (mlist '*table*
+                       (mlist 'math (mlist '+ 43) (mlist '- 45) (mlist '* 42))
+                       (mlist 'letters (mlist 'a 97) (mlist 'b 98))))
+
+Daha `assoc`u şu şekilde değiştirdim:
+
+    (define (assoc keys records)
+      (cond ((null? records) #f)
+            ((null? keys) records)
+            ((equal? (car keys) (mcar (mcar records)))
+             (if (null? (cdr keys))
+                 (mcar records)
+                 (assoc (cdr keys) (mcdr (mcar records)))))
+            (else
+             (assoc keys (mcdr records)))))
+
+Çalıştığından emin olalım:
+
+    > (assoc '(math +) (mcdr t))
+    {+ 43}
+    > (assoc '(letters b) (mcdr t))
+    {b 98}
+    > (assoc '(letters c) (mcdr t))
+    #f
+    > (assoc '(letters) (mcdr t))
+    {letters {a 97} {b 98}}
+
+Süper! 2 boyutlu tablolarda çalışıyorsa, recursive yapısından dolayı, 3 boyutla tablolarda denemeye gerek yok. Çünkü 3. boyutta da zaten şu anda 2. boyutta ne oluyorsa aynı olaylar olacak.
+
+`lookup`ı değiştirmeye hiç gerek yok. Sadece aldığı ilk parametrenın adını `key`den `keys`e çevirebiliriz, ne de olsa artık anahtar listesi alıyoruz, tek bir anahtar değil:
+
+    (define (lookup keys table)
+      (let ((record (assoc keys (mcdr table))))
+        (if record
+            (mcdr record)
+            #f)))
+
+Geldik zor kısmına: `insert!`. Birkaç durum var, madde madde listeleyeyim:
+
+* Aradığımız anahtarı bulduk.
+  * Aradığımız anahtar, anahtar listemizdeki son anahtar(böyle cümleler kurarım). O zaman bulduğumuz anahtarın değerini değiştireceğiz.
+  * Aradığımız anahtar, anahtar listemizdeki son anahtar değil. O zaman bu anahtara ait alt tablo için en başa dön.
+* Aradığımız anahtarı bulamadık.
+  * Son anahtar: Tabloyu bu anahtarı ve değerini ekleyerek güncelle.
+  * Son anahtar değil: Tabloya bu anahtarı ekle, alt tablosu için aynı işlemi başlat.
+
+Şu şekilde koda döktüm:
+
+
+    (define (insert! keys value table)
+      (let ((record (assoc (list (car keys)) (mcdr table))))
+        (if record
+            (if (null? (cdr keys))
+                (set-mcdr! record (mlist value))
+                (insert! (cdr keys) value record))
+            (if (null? (cdr keys))
+                (set-mcdr! table (mcons (mlist (car keys) value)
+                                        (mcdr table)))
+                (begin (set-mcdr! table (mcons (mcons (car keys) '())
+                                               (mcdr table)))
+                       (insert! (cdr keys) value (mcar (mcdr table))))))))
+
+
+## 3.26
+
+Hehe biran "implement" diyecek sandım ama neyse ki "describe" dedi.
+
+Öncelikle `assoc`, aradığımız key'in henüz bulunmadığı durumda, aradığımız key baktığımız keyden büyükse bir dala, küçükse diğer dala doğru aramayı sürdürecekti.
+
+Bulduğu durumda `insert!` yine aynı şekilde ekleme yapacak, ama bulamdığı durumda işler biraz karışacak. Bir üst dala çıkıp, aradığımız key'i yerine yerleştirmeli, ve onun altında başka bir key olacak mı onu tespit etmemiz gerekecekti. Yani mesela elimizdeki tree tamamen doluysa(yani her ağacın sonunda olmayan dalın 2 alt dalı varsa). Bir de ağaçları dengeleme muhabbeti falan işin içine girecekti.
+
+
+## 3.27
+
+Her zamanki gibi, diagramları çizmeyeceğim ama neler olup bittiğini açıklayacağım.
+
+`(define memo-fib (memoize ...))` kısmı çalıştığımda, global env'de `memo-fib` ismi `memoize`ın oluşturup döndüğü fonksiyonu gösterecek. Bu fonksiyonun env pointerı, `table`ın içinde bulunduğu frame'i gösterecek(fonksiyonların oluşturuldukları anda bulundukları frame'e bir pointer tuttuğunu hatırlayalım), dolayısıyla `table`a erişebilecek. Bu `table`ın bulunduğu frame de aslında `f`nin bulunduğu bir üst frame'e bir pointer tutacak. Bunu da şu şekilde açıklayabiliriz: `let` aslında sadece bir syntactic sugar. `let`i kaldırıp, `lambda` ile aynı fonksiyonu bir daha yazalım:
+
+    (define (memoize f)
+      ((lambda (table)
+         (lambda (x)
+           (let ((previously-computed-result (lookup x table)))
+             (or previously-computed-result
+                 (let ((result (f x)))
+                   (insert! x result table)
+                   result))))) (make-table)))
+
+En içteki lambda, bir dışındaki lambda'nın frameine, dıştaki lambda'da, `f`nin bulunduğu, `memoize` çağırıldığında oluşturulan frame'e bir pointer tutacak.
+
+Bu şekilde n. fibonacci'yi hesaplamak için n adım gerekiyor, çünkü hiçbir fibonacci'yi bir kereden fazla hesaplamıyoruz.
+
+`(memoize fib)` de çalışırdı. Farkeden birşey yok.
+
+
+## 3.28
+
+    (define (or-gate a1 a2 output)
+      (define (or-action-procedure)
+        (let ((new-value
+               (logical-or (get-signal a1) (get-signal a2))))
+          (after-delay or-gate-delay
+                       (lambda ()
+                         (set-signal! output new-value)))))
+      (add-action! a1 or-action-procedure)
+      (add-action! a2 or-action-procedure)
+      'ook)
+
+## 3.29
+
+`(not (and (not a) (not b)))` şeklinde yapabiliriz:
+
+    (define (or-gate a1 a2 output)
+      (let ((w1 (make-wire))
+            (not-a1 (make-wire))
+            (not-a2 (make-wire)))
+        (inverter a1 not-a1)
+        (inverter a2 not-a2)
+        (and-gate not-a1 not-a2 w1)
+        (inverter w1 output))
+      'ok)
+
+Gecikme fonksiyonlarımızın nasıl çalıştığıyla alakalı aslında. Örneğin ilk iki invert işlemi paralel olarak yapılabilir. Ama and işlemi için ilk iki işlemin yapılmış olması gerekir.
+
+Eğer ilk iki işlem paralel yapılırsa, `inverter-delay + and-gate-delay + inverter-delay`, paralel yapılamazsa `2 * inverter-delay + and-gate-delay + inverter-delay` süre gecikme yaşanır.
+
+## 3.30
+
+    (define (ripple-carry-adder a b s c)
+      (let ((cout (make-wire)))
+        (full-adder (car a) (car b) c (car s) cout)
+        (if (null? (cdr a))
+            'ok
+            (ripple-carry-adder (cdr a) (cdr b) (cdr s) cout))))
+
+
+## 3.31
+
+Eklediğimiz fonksiyonu o an çağırmazsak, fonksiyonun çıktısı(mantık kapısının çıkış teli yani) ilk çağrımıza kadar 0 kalacak. Örneğin `and-gate`e iki tane mantık-1 bağlasak bile, çıktısı tellerden herhangi birinin durumunu değiştirene kadar 0 kalacak, halbuki ilk başta çıktısı 1 olmalı.
+
+----------------------------------------------------------------------------------------
+
+Bu aşamadan sonra Racket'den Scheme48'e geçtim. R5S5 Scheme implementasyonu olduğunda, kitapdaki tüm kodlar direkt olarak çalışıyor(Racket'daki gibi mutable-pair vs. muhabbeti yok). SICP'in bir kötü yanı bence, alıştırmaların sürekli önceki bölümdeki ve alıştırmalardaki kodlara bağlı olmasından dolayı bir süre sonra işlerin çok karışması. Ben bu soruya geldiğimde, SICP'in kendi sayfasından bu bölüme ait kodları bulup onlar üzerinden devam ettim.
+
+Sonradan gelen düzeneleme: Scheme48'de de problem yaşamam uzun sürmedi. `error` özel formu Scheme48'de nedense yok, demek ki standart değil. Scheme48'de program ne zaman `error` formuna gelse "böyle bir değişken yok" diye bir hata veriyor, biz de `error`e geldiğini anlıyoruz. Şimdilik bu şekilde idare ediyorum(her error'den önce bir `display` koyularak hatada verilmek istenen mesaj verilebilir).
+
+----------------------------------------------------------------------------------------
+
+## Event-driven tasarım hakkında
+
+Şimdi, bu kısmı önemli gördüğümden biraz açıklama yapmak istiyorum.
+
+Bu bölümde yaptığımız şey, temel mantık kapılarını tanımladıktan sonra, telleri bu kapıların girişine ve çıkışına bağlıyoruz, ve girdi tellerinden herhangi biri değiştiğinde, yeni çıkışı istediğimiz gecikmeyle hesaplıyoruz.
+
+Bir tel bir mantık kapısına girdi olarak bağlandığında, mantık kapısı `add-action-procedure!` fonksiyonunu çağırarak, istediği bir fonksiyonu telin "sinyali değiştiğinde çağırılacaklar" listesine ekliyor. Örneğin ve kapısı koduna bakalım:
+
+    (define (and-gate a1 a2 output)
+      (define (and-action-procedure)
+        (let ((new-value
+               (logical-and (get-signal a1) (get-signal a2))))
+          (after-delay and-gate-delay
+                       (lambda ()
+                         (set-signal! output new-value)))))
+      (add-action! a1 and-action-procedure)
+      (add-action! a2 and-action-procedure)
+      'ok)
+
+`and-action-procedure`, girdi tellerinin sinyallerine bakarak, çıktı telinin sinyalini, `and-gate-delay` sonra değiştiriyor. `after-delay`in nasıl çalıştığını düşünmüyoruz şimdilik. `(and-gate a1 a2 o)` şeklinde çağırdığımızda, a1 ve a2 tellerinin "sinyalleri değiştiğinde çağırılacaklar" listesine bu fonksiyon ekleniyor ve bu şekilde ne zaman a1 veya a2 değişse, çıktı istenen gecikme sonra değiştiriliyor. Biraz da wire'ın implementasyonuna bakalım.
+
+    (define (make-wire)
+      (let ((signal-value 0) (action-procedures '()))
+        (define (set-my-signal! new-value)
+          (if (not (= signal-value new-value))
+              (begin (set! signal-value new-value)
+                     (call-each action-procedures))
+              'done))
+        (define (accept-action-procedure! proc)
+          (set! action-procedures (cons proc action-procedures))
+          (proc))
+        (define (dispatch m)
+          (cond ((eq? m 'get-signal) signal-value)
+                ((eq? m 'set-signal!) set-my-signal!)
+                ((eq? m 'add-action!) accept-action-procedure!)
+                (else (error "Unknown operation -- WIRE" m))))
+        dispatch))
+
+Burda `action-procedures`, kendi sinyali değiştiğinde çağırılaca fonksiyonları tutuyor. İlk başta `signal-value` 0. İşte bir teli bir mantık kapısına bağlarsak, mantık kapısı istediği fonksiyonu bu `action-procedures`a ekliyor. Sinyal değiştiğinde, `call-each` ile tüm bu fonksiyonlar çağırılıyor. Burda dikkat edilecek bir nokta, eklenen her yeni fonksiyon `action-procedures` listesinin en başına ekleniyor. `call-each`e bakalım:
+
+    (define (call-each procedures)
+      (if (null? procedures)
+          'done
+          (begin
+            ((car procedures))
+            (call-each (cdr procedures)))))
+
+`call-each` listeyi düz gezdiğinden, son eklenen fonksiyonu ilk çağıracak. Bu ilerde önemli bir detay olabilir.
+
+Şimdi, diyelim ki bir `and-gate`e bağlı telimizin sinyali değişti. Tel, `and-gate`in çıkış sinyalinin değişmesi için gerekli fonksiyonu çağırdı, ve bu fonksiyon da `(after-delay and-gate-delay (lambda () ..))` şeklinde başka bir fonksiyon çağırıldı. Bu `after-delay` nasıl çalışacak? Hesaplamanın istenen gecikme sonra yapılması nasıl sağlanacak?
+
+Bunun için `agenda`(ajanda?!) adlı bir queue tutuyoruz. `after-delay`, bu queueya ekleme yapıyor, ama burda elemanlar sıralı tutuluyor, gecikmesi en az olanlar ilk başta olacak şekilde. Bu sayede sürekli ilk elemanı aldığımızda gecikmeleri azdan çoğa doğru giden elemanlar almış oluyoruz.
+
+    (define (after-delay delay action)
+      (add-to-agenda! (+ delay (current-time the-agenda))
+                      action
+                      the-agenda))
+
+Yaptığı iş bariz. `add-to-agenda!`da bu sıralı listeye ekleme yapıyor. Kod epey uzun, kitapda var. Şimdi sırası gelen hesaplamaları yapan `propagate` fonksiyonuna bakalım:
+
+    (define (propagate)
+      (if (empty-agenda? the-agenda)
+          'done
+          (let ((first-item (first-agenda-item the-agenda)))
+            (first-item)
+            (remove-first-agenda-item! the-agenda)
+            (propagate))))
+
+Yaptığı iş, `agenda`tüm elemanları çekip gerekli hesaplamaları yapıyor. `agenda`ya elemanlar gecikmelerine göre sıralıydı. `first-agenda-item`, `agenda`daki ilk elemanı verip, zamanı bu elemanın zamanına eşitliyor.
+
+Burda dikkat edilecek bir nokta da, bu ajandadaki her bir eleman aslında gecikmesiyle değil, çalıştırıldıktan sonraki zamanla tutuluyor. Bu şöyle bir fayda sağlıyor, sırayla fonksiyonları çağırdığımızda, örneğin gecikmesi 3 olan iki fonksiyon sırada olsun, ama bunlar birbirleriyle paralel çalıştırılabilir(birbirleriyle bağlantısız 2 and-gate mesela) olsun, bu durumda eğer yeni zamanımız `şu-anki-zaman + çalıştırılan-fonksiyonun-gecikmesi` olsaydı, paralel çalışmalarına rağmen gecikme olması gerekenden fazla olacaktı. Ama bu şekilde, bir fonksiyonu ajandaya eklerken `eklenme-zamanı + gecikme` şeklide tutulduğundan, bu problem olmuyor.
+
+Aklıma farkedilmesi gereken başka şeyler gelirse buraya ekleyeceğim. Şimdilik bu kadar.
+
+## 3.32
+
+Bana hiçbir şey düzgün çalışmazdı gibi geldi, örneğin `full-adder` örneğinde, şu anda ilk önce iki `half-adder` tellerdeki değişimlere göre çıktıyı belirlemeli ki, eldeyi belirleyen son `or-gate` doğru sonuç versin. Ama ilk önce eldeyi belirleyen `or-gate` çalışırsa, elde değişemeyecekti.
+
+
+## 3.33
+
+    (define (averager a b average)
+      (let ((c (make-connector))
+            (m1 (make-connector))
+            (m2 (make-connector)))
+        (constant 1/2 c)
+        (multiplier a c m1)
+        (multiplier b c m2)
+        (adder m1 m2 average)))
+
+## 3.34
+
+Şöyle bir demoyla açıklayalım:
+
+    > (define a (make-connector))
+    ; no values returned
+    > (define r (make-connector))
+    ; no values returned
+    > (probe "a" a)
+    #{Procedure 9404 (me in probe)}
+    > (probe "r" r)
+    #{Procedure 9404 (me in probe)}
+    > (squarer a r)
+    #{Procedure 9393 (me in multiplier)}
+    > (set-value! r 100 'user)
+
+    Probe: r = 100'done
+    > (get-value a)
+    #f
+
+Burda farketmemiz gereken şey, `r`nin değerini değiştirmeme rağmen `a` değişmedi. Sebebi `multiplier`. `multiplier` yeni değeri hesaplarken, girdi ve çıktılardan ikisinin bir değerinin olduğunu varsayıyor. Zaten başka türlü hesaplayamaz. Ama biz `squarer`da, iki girdiyi aynı connector yaptığımızda, birine bir değer atamadığımızda `multiplier`ın iki girdisi değersiz olmuş oluyor.
+
+## 3.35
+
+    (define (squarer a b)
+      (define (process-new-value)
+        (if (has-value? b)
+            (if (< (get-value b) 0)
+                (display "square less than 0 -- SQUARER")
+                (set-value! a (expt (get-value b) 1/2) me))
+            (set-value! b (* (get-value a) (get-value a)) me)))
+      (define (process-forget-value)
+        (forget-value! a me)
+        (forget-value! b me)
+        (process-new-value))
+      (define (me request)
+        (cond ((eq? request 'I-have-a-value)
+               (process-new-value))
+              ((eq? request 'I-lost-my-value)
+               (process-forget-value))
+              (else
+               (display "Unknown request -- SQUARER"))))
+      (connect a me)
+      (connect b me)
+      me)
+
+## 3.36
+
+`set-value!`, `a`nın döndüğü `me` fonksiyonuna `'set-value!` mesajını gönderecek ve `me` fonksiyonu `set-my-value` fonksiyonunu dönecek. Daha sonra bu fonksiyon `newval`ın 10, `setter`ın da `'user` olduğu bir ortamda çalıştırılacak.
+
+## 3.37
+
+    (define (c+ a b)
+      (let ((r (make-connector)))
+        (adder a b r)
+        r))
+
+    (define (c* a b)
+      (let ((r (make-connector)))
+        (multiplier a b r)
+        r))
+
+    (define (c/ a b)
+      (let ((r (make-connector)))
+        (multiplier r a b)
+        r))
+
+    (define (cv a)
+      (let ((r (make-connector)))
+        (constant a r)
+        r))
+
+
