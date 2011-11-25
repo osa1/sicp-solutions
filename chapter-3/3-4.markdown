@@ -1,0 +1,123 @@
+## 3.38
+
+a) 3 farklı işlem 6 farklı sırayla yapılabilir, işlemlere 1, 2, 3 diyelim:
+
+    1 2 3
+    1 3 2
+    2 1 3
+    2 3 1
+    3 1 2
+    3 2 1
+
+Bunların her biri için farklı sonuçlar elde ederiz(herhangi bir iki işlem aynı olsaydı veya iki işlemin toplamı 3. işleme eşit olsaydı falan aynı sonucu da elde edebilirdik tabi). Örneğin ilk durum için `balance` `45`, ikinci durum için `35` olacak.
+
+b) Örneğin Peter `balance`a erişir, o sırada Paul `balance`ı 20 azaltır, sonra Peter yeni `balance`ı belirlerse, `balance` 90 olması gerekirken 110 olacak.
+
+-----------------------------------------------------------------------------------
+
+Bu aşamada yeniden Racket'a geçmek zorunda kaldım. [Eli usta](http://eli.thegreenplace.net/2007/10/26/sicp-334/) `make-serializer` ve `parallel-execute` implementasyonlarını vermiş Racket için. Bu fonksiyonlar standart değil.
+
+-----------------------------------------------------------------------------------
+
+## 3.39
+
+İlk işlemdeki serializer, `x`e iki erişim ve `x`in kendisiyle çarpımı işlemleri arasında `x`e erişime izin vermeyecek. Dolayısıyla `(* x x)` işlemi kesilemez. İkinci serializer'da `x`in değerinin bir arttırılması işlemini kesilemez yapıyor. Bu durmuda şunlar olabilir:
+
+* İlk işlem önce çalışır:
+  * İlk işlem `x`i hesaplar, ikinci işlem çalışır, `x`in değeri bir arttırılı, ilk işlem atamayı yapar, ikinci işlem geçersiz olur, x = 100.
+  * İlk işlem `x`i hesaplar, atamayı yapar, ikinci işlem çalışır, x = 101.
+* İkinci işlem önce çalışır. x = 121.
+
+2 durumu elemiş olduk.
+
+## 3.40
+
+İlk halde bir sürü farklı durum oluşabilir, ikincide ise (x^2)^(x^3) == (x^3)*(x^2) olduğundan iki durumda da aynı sonucu elde etmiş oluruz.
+
+## 3.41
+
+Ben bence haklı değil. `balance` zaten tek bir bölünemez işlem yapıyor. `withdraw` ve `deposit` zaten `protected` olduğundan, `balance`ı `serialize` yapmamıza gerek yok.
+
+## 3.42
+
+Bu şekilde kod daha mantıklı geldi bana. `withdraw` veya `deposit` her çağırıldığında bunların `serialized` hali hazırlanıp dönüleceğine, `make-account` anında bunlar hazırlanılıp daha, daha sonra `withdraw` ve `deposit`in daha hızlı dönülmesi sağlanabilir. Daha az işlem yapılmış olur.
+
+Concurrency açısından herhangi bir değişiklik olmaz.
+
+
+## 3.43
+
+2 `exchange` arasında, farkların hesaplana işlemlerinin sırasına göre değişiklik olacak. Çalıştıracağımız kod şu olsun:
+
+    (exchange acc1 acc2)
+    (exchange acc2 acc3)
+
+Önemli olan, `exchange` fonksiyonu içerisinde `difference`lar hesaplanırken arada `withdraw` ve `deposit`lerin çağırılıp çağırılmadığı. Şöyle 3 hesabımız olsun:
+
+    (define acc1 (make-account 10))
+    (define acc2 (make-account 20))
+    (define acc3 (make-account 30))
+
+Eğer işlemler ard arda yapılırsa, ne olursa olsun sonuçta hesaplardan biri 10, biri 20, biri 30 olmak zorunda. Çünkü `exchange` bunların `balance`larını değiştiriyor, ve elimizde bir 10, bir 20, bir 30'luk hesap olduğuna göre, bunları arasında nasıl değiştirirsen değiştir yine bir 10, bir 20, bir 30luk hesabımız olmalı.
+
+Ama eğer işlemler `serialized` değilse işler değişir. Örneğin `(exchange acc1 acc2)` `difference`ı hesapladıktan sonra(10), `(exhange acc2 acc3)` tüm işlemi yapmış olsun. Bu durumda `acc2` 30, `acc3` 20 olmuş olacak ve ilk `exchange` işlemin geri kalanını tamamladığında sonuçta `acc1` 20, `acc2` 20, `acc3` 20 olmuş olacak.
+
+
+## 3.44
+
+Yani bana hiçbir ihtimal gelmiyor. Cevap anahtarı yok mu öğrenelim gözden kaçırdığımız bir yer varsa?
+
+_sonradan düzenleme_: [Şurdaki](http://wqzhang.wordpress.com/2009/08/03/sicp-exercise-3-44/) arkadaş da bana katılıyormuş. Güzel de bir açıklama yapmış: `exchange` fonksiyonumuzda bir ara değer tutuyorduk ve bu çağırılma sırasına göre bu değer değişebiliyor ve bu sonucumuza etki ediyordu, ama `transfer` fonksiyonumuzda böyle bir durum yok.
+
+Alsında bir de ben açıklama getireyim: `transfer` ile `exchange`in amacı farklı. `transfer`de, `amount`un bir şekilde doğru hesaplandığını varsayıyoruz ve bu dakikadan sonra hiçbir şey sonucumuzu etkileyemiyor. Ama `exchange`de, `difference`ı hesaplarken başka `exchange` işlemleri hesaplardaki miktarları değiştirebilir ve bizim sonucumuzu etkileyebilirdi.
+
+## 3.45
+
+Aha! Bu durumda `serialized-exchange` hiçbir zaman bitemez. `serialized-exchange`i düşünelim:
+
+    (define (serialized-exchange account1 account2)
+      (let ((serializer1 (account1 'serializer))
+            (serializer2 (account2 'serializer)))
+        ((serializer1 (serializer2 exchange))
+         account1
+         account2)))
+
+`exchange` de şöyle birşey:
+
+    (define (exchange account1 account2)
+      (let ((difference (- (account1 'balance)
+                           (account2 'balance))))
+        ((account1 'withdraw) difference)
+        ((account2 'deposit) difference)))
+
+`exchange` fonksiyonu iki hesap ile de `serialize` yapılıp çağırılacak ve bu yüzden kendisi `withdraw` ve `deposit` fonksiyonlarını çağıramayacak. Kilitlenip kalacak.
+
+
+## 3.46
+
+İki `test-and-set!` aynı anda çağırılır, ilki `(car cell)`i test ettikten sonra, `(set-car! cell true)` çağırılmadan önce ikincisi de test eder ve iki çağında da `mutex`i almış olur.
+
+## 3.47
+
+TODO
+
+## 3.48
+
+Güzel yöntem. Şöyle düşünelim, `(serialized-exchange acc1 acc2)` ve `(serialized-exchange acc2 acc1)` concurrent olarak çağırılsın. `acc1`in ID'si 1, `acc2`'ninki 2 olsun. Bu durumda `(serialized-exchange acc1 acc2)` `acc1`in mutexini alacak, `serialized-exchange` de `acc1`'in ID'si daha düşük olduğundan onun mutexini almak isteyecek, ama alamayacağından ilk fonksiyon işini bitirene kadar bekleyecek, `acc2`nin mutexini almayacak. Deadlock oluşmamış olacak.
+
+Yeni `serialized-exchange`:
+
+    (define (serialized-exchange account1 account2)
+      (let ((id-1 (account1 'identity))
+            (id-2 (account2 'identity))
+            (serializer1 (account1 'serializer))
+            (serializer2 (account2 'serializer)))
+        (if (< id-1 id-2)
+            ((serializer1 (serializer2 exchange))
+             account1 account2)
+            ((serializer2 (serializer1 exchange))
+             account1 account2))))
+
+## 3.49
+
+Aklıma birşey gelmedi. Bilen varsa söylerse sevinirim.
