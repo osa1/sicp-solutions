@@ -1,0 +1,441 @@
+Bölüme başlamadan önce bir not: Kitapda `cons-stream`ın tanımı verilmemiş. Parametrelerini çalıştırmadan aktarmamız gerektiğinden özel bir form kullanmak zorundayız. Scheme macrolarıyla şu şekilde yapabiliriz:
+
+    (define-syntax cons-stream
+      (syntax-rules ()
+        ((cons-stream x y) (cons x (delay y)))))
+
+## 3.50
+
+    (define (stream-map proc . argstreams)
+      (if (stream-null? (car argstreams))
+          the-empty-stream
+          (cons-stream
+           (apply proc (map stream-car argstreams))
+           (apply stream-map
+                  (cons proc (map stream-cdr argstreams))))))
+
+
+## 3.51
+
+    > (define x (stream-map show (stream-enumerate-interval 0 10)))
+    0; no values returned
+
+0 direkt yazdırıldı, sebebi, streamların `car`ının çalıştırılıp saklanması, ertelenen kısım her zaman `cdr`(implementasyona bakın).
+
+    > (stream-ref x 5)
+    1
+    2
+    3
+    4
+    55
+
+Sonraki 5 eleman çalıştırılıyor, değerler yazdıricplıyor ve en son 5. elemanın değeri döndürülüyor.
+
+    > (stream-ref x 7)
+    6
+    77
+
+`memo-proc`dan dolayı ilk elemanlar yeniden hesaplanmıyor, dolayısıyla `show` çağırılmıyor.
+
+
+## 3.52
+
+`sum`ın değerini her zaman son çağırılan `accum` belirleyecek. `(stream-ref y 7)`de, 1 den başlayarak her seferinde sum'a ekleme yaparak elde ettiğimiz 7. çift `sum` dönülecek. `(display-stream z)`de de `1 + 2 + 3 + 4 + 5 ... + 20` işlemindeki her bir adım ile elde ettiğimiz sayılardan 5' bölünenleri hesaplayıp 7.sini dönecek.
+
+`delay`ın tanımına göre cevap değişmeyecekti. Ancak her bir adımda yazdırma işlemi falan yapıyorsak, yazdırılan elemanlar değişecekti. Çünkü ilk adımda(`(stream-ref y 7)`) streamın ilk birkaç elemanını zaten hesaplamış olacaktık.
+
+
+## 3.53
+
+1, 2, 4, 8, 16, 32 .. dizisi. İlk elemanı 1, geri kalan elemanları bir önceki elemanın 2 katı olan bir dizi(valla çalıştırmadan buldum hocam :P ).
+
+## 3.54
+
+    (define (mul-streams s1 s2)
+      (stream-map * s1 s2))
+
+    (define factorials
+      (cons-stream 1 (mul-streams factorials integers)))
+
+## 3.55
+
+    (define (partial-sums stream)
+      (define (partial stream sum)
+        (let ((s (+ (car stream) sum)))
+          (cons-stream s
+                       (partial (stream-cdr stream)
+                                s))))
+      (partial stream 0))
+
+
+## 3.56
+
+    (define S (cons-stream 1 (merge (scale-stream S 2)
+                                    (merge (scale-stream S 3)
+                                           (scale-stream S 5)))))
+
+
+## 3.57
+
+`memoize` fonksiyonunu yazarken de tartışmıştık. Şu anda `(fib n)` için n işlem yapılıyor, diğer türlü `(fib n)` için en baştan itibaren `(fib (- n 1))` ve yine en baştan `(fib (- n 2))` hesaplanacaktı ve `n * (n - 1)` işlem yapılmış olacaktı.
+
+## 3.58
+
+İlk elemanı `num * radix`in `den`e bölümü(nün tamsayı kısmı), ikinci elemanı ise aynı işlemin `num` yerine `num * radix`in `den`e bölümünden kalana uygulanmış hali.
+
+Anlamak için `(expand 3 8 10)`u çalıştıralım. İlk elemanı `(quotient (* num radix) den)`den 3, ikinci elemanı ise `(expand (remainder (* num radix) den))`den, `(expand 6 8 10)`.
+
+## 3.59
+
+    (define (integrate-series stream)
+      (define (it stream div)
+        (cons-stream (/ (stream-car stream) div)
+                     (it (stream-cdr stream) (+ div 1))))
+      (it stream 1))
+
+
+## 3.60
+
+    (define exp-series
+      (cons-stream 1 (integrate-series exp-series)))
+
+    (define hs
+      ;; 0 -1 0 1
+      (cons-stream 0 (cons-stream -1 (cons-stream 0 (cons-stream 1 hs)))))
+
+    (define cosine-series
+      (mul-streams hs exp-series))
+
+    (define shs
+      ;; 1 0 -1 0
+      (cons-stream 1 (cons-stream 0 (cons-stream -1 (cons-stream 0 shs)))))
+
+    (define sine-series
+      (mul-streams shs exp-series))
+
+## 3.61
+
+TODO
+
+## 3.62
+
+TODO
+
+## 3.63
+
+Louis'in sürümünde fazla işlem yapıldığı çok bariz. Daha iyi görebilmek için iki kodu da şu şekilde değiştirip çalıştıralım:
+
+    (define (sqrt-stream x)
+      (define guesses
+        (cons-stream 1.0
+                     (stream-map (lambda (guess)
+                                   (display "guess = ")
+                                   (display guess)
+                                   (newline)
+                                   (sqrt-improve guess x))
+                                 guesses)))
+      guesses)
+
+    (define (sqrt-stream x)
+      (cons-stream 1.0
+                   (stream-map (lambda (guess)
+                                 (display "guess = ")
+                                 (display guess)
+                                 (newline)
+                                 (sqrt-improve guess x))
+                               (sqrt-stream x))))
+
+    (stream-ref (sqrt-stream 2) 10)
+
+İlk önce az ilk fonksiyonu çalıştıralım:
+
+    > (stream-ref (sqrt-stream 2) 10)
+    guess = 1.0
+    guess = 1.5
+    guess = 1.4166666666666665
+    guess = 1.4142156862745097
+    guess = 1.4142135623746899
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    1.414213562373095
+
+Sonra da ikinciyi:
+
+    > (stream-ref (sqrt-stream 2) 10)
+    guess = 1.0
+    guess = 1.0
+    guess = 1.5
+    guess = 1.0
+    guess = 1.5
+    guess = 1.4166666666666665
+    guess = 1.0
+    guess = 1.5
+    guess = 1.4166666666666665
+    guess = 1.4142156862745097
+    guess = 1.0
+    .. 35 satır sildim ..
+    guess = 1.5
+    guess = 1.4166666666666665
+    guess = 1.4142156862745097
+    guess = 1.4142135623746899
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    guess = 1.414213562373095
+    1.414213562373095
+
+Neden böyle oldu? Benim anladığım şu: ilk fonksiyonda bir tane stream oluşturup, sürekli ona ekleme yaparken, ikinci durumda, 5 kere iterate etmek için, önce `(sqrt-stream x)`i 4 kere iterate ediyoruz, bunun için `(sqrt-stream x)`i 3 kere ... ta ki tek iterasyon yapmak istediğimiz zamana kadar, o zaman da sonuç zaten `(car-stream (cons-stream 1.0 ...))` oluyor. Dikkat ederseniz 10 iterasyonda 1.0 tahminini 10 kere yaptık.
+
+## 3.64
+
+    (define (stream-limit stream n)
+      (define (strl-iter stream n last)
+        (if (< (abs (- last (stream-car stream))) n)
+            (stream-car stream)
+            (strl-iter (stream-cdr stream) n (stream-car stream))))
+      (strl-iter (stream-cdr stream) n (stream-car stream)))
+
+
+## 3.65
+
+    (define (ln2-summands n)
+      (cons-stream (/ 1.0 n)
+                    (stream-map - (ln2-summands (+ n 1)))))
+
+    (define ln2-stream
+      (partial-sums (ln2-summands 1)))
+
+Farkı gözlemlemek için:
+
+    > (define t (stream-map show ln2-stream))
+    1.0
+    > (stream-ref t 10)
+    0.5
+    0.8333333333333333
+    0.5833333333333333
+    0.7833333333333332
+    0.6166666666666666
+    0.7595238095238095
+    0.6345238095238095
+    0.7456349206349207
+    0.6456349206349207
+    0.7365440115440116
+
+
+    > (define t (stream-map show (euler-transform ln2-stream)))
+    0.7
+    > (stream-ref t 10)
+    0.6904761904761905
+    0.6944444444444444
+    0.6924242424242424
+    0.6935897435897436
+    0.6928571428571428
+    0.6933473389355742
+    0.6930033416875522
+    0.6932539682539683
+    0.6930657506744464
+    0.6932106782106783
+
+
+    > (define t (stream-map show (accelerated-sequence euler-transform ln2-stream)))
+    1.0
+    > (stream-ref t 10)
+    0.7
+    0.6932773109243697
+    0.6931488693329254
+    0.6931471960735491
+    0.6931471806635636
+    0.6931471805604039
+    0.6931471805599445
+    0.6931471805599427
+    0.6931471805599454
+    +nan.0
+
+Son satır neden böyle olduğ emin değilim, bir şekilde hesaplayabileceğimiz hassasslığı aştık sanırım.
+
+## 3.66
+
+Nasıl çalıştığını inceleyelim biraz. Öncelikle `interleave`in ne iş yaptığını anlayalım: iki tane stream alıp, bir sefer birincisinin ilk elemanını, bir sefer ikincisinin ilk elemanını veriyor ve diğer elemanlara devam ediyor. `pairs` fonksiyon, ilk elemanı `(list (stream-car s) (stream-car t))`, ikinci elemanı ise `interleave` sayesinde bir `(stream-map (lambda (x) (list (stream-car s) x)) (stream-cdr t))`, bir `(pairs (stream-cdr s) (stream-cdr t))` olan bir stream.
+
+Burda `pairs` ilk elemandan sonra sürekli `interleave` ile 2 seferde bir yine `pairs` çağıracak ve bu `pairs`da yine bir elemandan sonra 2 seferde bir `pairs` çağıracak falan.
+
+İlk çağrı, (1 1)'den sonra 2 seferde bir `(interleave (stream-map ...) ..)` kısmından dolayı bir `(1 x)` gelecek. Dolayısıyla `(1 100)` için 99 * 2 = 198 işlem yapacağız.
+
+Diğer durumlar için bir mantık yürütemedim, örnek çıktılar inceledip bir formül uydurulabilir. TODO diyelim şöyle.
+
+## 3.67
+
+    (define (pairs2 s t)
+      (cons-stream
+       (list (stream-car s) (stream-car t))
+       (interleave (stream-map (lambda (x) (list x (stream-car t)))
+                               (stream-cdr s))
+                   (interleave
+                    (stream-map (lambda (x) (list (stream-car s) x))
+                                (stream-cdr t))
+                    (pairs (stream-cdr s) (stream-cdr t))))))
+
+## 3.68
+
+Şöyle bir problem oluşurdu, `cons-stream` kullanmadığımızan, fonksiyon sonsuz bir döngüye girerdi. Şöyle; `interleave`in ikinci parametresi yine `pairs3`. Ve eğer `s` ve `t`den en az biri sonsuz uzunluktaysa, bu fonksiyon hiçbir zaman bitemez. `cons-stream` kullandığımız durumda, `stream-cdr` istediğimiz zaman hesaplandığından ve onun `stream-cdr`ı da aynı şekilde geciktirildiğinden, böyle bir sorun olmuyordu. İstediğimiz zaman bir adım sonrasını hesaplıyorduk sadece.
+
+(Sonradan kafama takılan bir yer hakkında not: evet `interleave` `cons-stream` kullanıyor ama sonuçta `interleave`e aktarılan parametreleri herhangi bir şekilde çalıştırmadan aktaramıyoruz. `interleave` bir macro veya özel form değil, fonksiyon, parametreler çalıştırılıp aktaarılıyor(bkz. applicative-order evaluation).
+
+## 3.69
+
+Dün gece çok zor gelmişti sabah 2 dakikada yaptım ne biçim iş...
+
+    (define (triples s t u)
+      (cons-stream
+       (list (stream-car s) (stream-car t) (stream-car u))
+       (interleave (stream-map (lambda (x) (append (list (stream-car s)) x))
+                               (pairs (stream-cdr t) (stream-cdr u)))
+                   (triples (stream-cdr s) (stream-cdr t) (stream-cdr u)))))
+
+    (define pythagorean-triples
+      (stream-filter (lambda (x) (= (+ (square (car x)) (square (cadr x)))
+                               (square (caddr x))))
+                     (triples integers integers integers)))
+
+## 3.70
+
+Bu soruda bir şey kafamı karıştırdı, bu merge işleminin doğru çalışabilmesi için streamların kendi içlerinde bir şekilde sıralı olması lazım. Örneğin `weight` fonkisyonumuz `a - b` ise, `b`yi alacağımız stream'ın büyükten küçüğe, `a`yı alacağımız stream'ın küçükten büyüğe sıralı olması lazım ki `weight`lere göre merge ettiğimizde en az `weight`den en çoka doğru sıralamış olalım.
+
+Ya da ikinci bir alternatif bir tree oluşturup, her seferinde arama yapıp uygun yere yerleştirmek. Soru bizden hangisini bekliyor anlayabilmiş değilim.
+
+Bu soru hakkında anlamadığım bir diğer şey de bu merge'in parametre olarak 2 pair streamı mı yoksa normal stream mı alacağı.
+
+Sonradan gelen düzenleme: Biraz araştırdım, kitaptaki tanıma en uygun(önceki `merge` fonksiyonuna da bakarak) bu gibi, ilk paragrafta bahsettiğim probleme sahip:
+
+    (define (merge-weighted s1 s2 weight)
+      (cond ((stream-null? s1) s2)
+            ((stream-null? s2) s1)
+            (else
+             (let ((s1car (stream-car s1))
+                   (s2car (stream-car s2)))
+               (let ((w1 (weight s1car))
+                     (w2 (weight s2car)))
+                 (cond ((<= w1 w2)
+                        (cons-stream s1car (merge-weighted (stream-cdr s1)
+                                                           s2 weight)))
+                       (t
+                        (cons-stream s2car (merge-weighted s1 (stream-cdr s2)
+                                                           weight)))))))))
+
+
+İlk şık şöyle oluyor o zaman:
+
+    (merge-weighted integers integers (lambda (x) (+ x x)))
+
+İşte hacı, bu böyle olmaz bu işte bir yanlışlık var bence. Burda integers bir pair streamı değil, `car`ı her zaman tek bir eleman ve buna `weight` fonksiyonu uygulayamıyoruz. Anlamadığım birşey var gibi ama neyse, şimdilik geçiyorum.
+
+
+## 3.71
+
+TODO
+
+## 3.72
+
+TODO
+
+
+## 3.73
+
+Burda ilk anda devrenin `v` çıktısı ne olur? Ondan emin değilim. Ama sonuçta yeterince erken ölçebilirsek, devreyi çalıştırdığımız an, çıktısı 0 olacaktır.
+
+    (define (RC R C dt)
+      (define (r stream init-v)
+        (cons-stream
+         0 ;; baslangic durumunun bu oldugundan emin degilim
+         (add-streams (scale-stream stream R)
+                      (integral (scale-stream stream (/ 1 C))
+                                init-v dt))))
+      r)
+
+## 3.74
+
+    (define zero-crossings
+      (stream-map sign-change-detector
+                  sense-data (stream-cons 0 sense-data)))
+
+## 3.75
+
+`make-zero-crossing`de hem bir önceki ortalamaya hem de bir önceki değere ihtiyacımız var. Şu durumda `last-value` aslında bir önceki değeri değil, bir önceki ortalamayı tutuyor.
+
+    (define (make-zero-crossings input-stream last-value last-avpt)
+      (let ((avpt (/ (+ (stream-car input-stream) last-avpt) 2)))
+        (cons-stream (sign-change-detector avpt last-value)
+                     (make-zero-crossings (stream-cdr input stream)
+                                          (stream-car input-stream)
+                                          avpt))))
+
+## 3.76
+
+    (define (smooth stream)
+      (cons-stream (/ (+ (stream-car stream)
+                         (stream-car (stream-cdr stream))) 2)
+                   (smooth (stream-cdr stream))))
+
+    (define (make-zero-crossings input-stream last-val smooth)
+      (let ((smooth-val (stream-car (smooth input-stream))))
+        (cons-stream (sign-change-detector smooth-val last-val)
+                     (make-zero-crossings (stream-cdr input-stream)
+                                          smooth-val smooth))))
+
+## 3.77
+
+    (define (integral delayed-integrand initial-value dt)
+      (cons-stream initial-value
+                   (if (stream-null? integrand)
+                       the-empty-stream
+                       (let ((integrand (force delayed-integrand)))
+                         (integral (stream-cdr integrand)
+                                   (+ (* dt (stream-car integrand))
+                                      initial-value)
+                                   dt)))))
+
+
+## 3.78
+
+    (define (solve-2nd a b dt y0 dy0)
+      (define dy (integral (delay ddy) dy0 dt))
+      (define y (integral (delay dy) y0 dt))
+      (define ddy (add-streams (scale-stream dy a)
+                               (scale-stream y b)))
+      y)
+
+Oha!!1 Düzgün bir örnek bulup deneyemedim(kitapda test case yok hiç), ama eğer bu çalışıyorsa bile, nasıl çalıştığını açıklayabileceğimi sanmıyorum(sıkı durun, deniyorum).
+
+Şimdi, son tanımladığımız `integral` fonksiyonuna göre, `y` bize ilk başta `initial-value`, yani y0'ı verecek(`(car-stream y)`), ikinci eleman içinse artık `(delay dy)` kısmını çalıştıracak. Burda `dy`nin ilk elemanı `dy0` olduğundan bir sorun yok, ikinci eleman içinse `dy` `(delay ddy)` kısmını çalıştıracak, bu da dy ve y'ye bağlı bir stream oluşturduğundan ve bu iki streamın da ilk elemanı bu aşamada oluşturulmuş olduğundan tüm fonksiyon sorunsuz çalışacak!
+
+Süper lan! Anlatırken anladım işte bir soruyu daha(anlatabildiğimi göstermiyor tabii ki bu hehe).
+
+## 3.79
+
+    (define (solve-2nd f dt y0 dy0)
+      (define y (integral (delay dy) y0 dt))
+      (define dy (integral (delay ddy) dy0 dt))
+      (define ddy (map-stream f dy y))
+      y)
+
+## 3.80
+
+Kolay soru da kafam almıyor şuan. TODO
+
+## 3.81
+
+    (define (rand init)
+      (define r
+        (cons-stream init
+                     (stream-map rand-update r)))
+      r)
+
+Rest için rand'ı yeniden çağırmak gerekiyor.
+
+## 3.82
+
+TODO
