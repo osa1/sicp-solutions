@@ -5,7 +5,7 @@ TODO:
 
 - I've already done the first chapter, but didn't take note. Maybe I solve all exercises in first chapter and make a commit.
 - Exercise 2.14, 2.15, 2.16.
-- Exercise 3.47. (I'm reading chapter 3.5 right now)
+- Ex 3.47, 3.61, 3.62, 3.66, 3.71, 3.72, 3.80, 3.82.
 - Fourth chapter.
 - Fifth chapter.
 
