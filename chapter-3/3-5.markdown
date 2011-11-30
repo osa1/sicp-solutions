@@ -331,17 +331,51 @@ Sonradan gelen düzenleme: Biraz araştırdım, kitaptaki tanıma en uygun(önce
 
     (merge-weighted integers integers (lambda (x) (+ x x)))
 
-İşte hacı, bu böyle olmaz bu işte bir yanlışlık var bence. Burda integers bir pair streamı değil, `car`ı her zaman tek bir eleman ve buna `weight` fonksiyonu uygulayamıyoruz. Anlamadığım birşey var gibi ama neyse, şimdilik geçiyorum.
-
+    (define (weighted-pairs s1 s2 weight)
+      (cons-stream
+       (list (stream-car s1) (stream-car s2))
+       (merge-weighted
+        (stream-map (lambda (x) (list (stream-car s1) x))
+                    (stream-cdr s2))
+        (weighted-pairs (stream-cdr s1) (stream-cdr s2) weight)
+        weight)))
 
 ## 3.71
 
-TODO
+    (define (romanujan-numbers)
+      (define (weight p)
+        (let ((x (car p))
+              (y (cadr p)))
+          (+ (* x x x) (* y y y))))
+      (define (romanujan-iter stream)
+        (if (= (weight (stream-car stream))
+               (weight (stream-car (stream-cdr stream))))
+            (cons-stream (weight (stream-car stream))
+                         (romanujan-iter (stream-cdr (stream-cdr stream))))
+            (romanujan-iter (stream-cdr stream))))
+      (romanujan-iter (weighted-pairs integers integers weight)))
+
+
+    > (define t (romanujan-numbers))
+    > (define t2 (stream-map show t))
+    1729
+    > (stream-ref t2 5)
+    4104
+    13832
+    20683
+    32832
+    3931239312
 
 ## 3.72
 
-TODO
+Aynı şekilde, `weight` fonksiyonumuz bu sefer şöyle olacak:
 
+    (define (weight p)
+      (let ((x (car p))
+            (y (cadr p)))
+        (+ (* x x) (* y y))))
+
+Bir `weight`i eşit ardığık iki elemana değil de 3 elemana bakacağız bu sefer.
 
 ## 3.73
 
@@ -424,7 +458,20 @@ Süper lan! Anlatırken anladım işte bir soruyu daha(anlatabildiğimi gösterm
 
 ## 3.80
 
-Kolay soru da kafam almıyor şuan. TODO
+    (define (RLC R L C dt)
+      (define (r vc0 il0)
+        (define il
+          (integral (delay dil) il0 dt))
+        (define vc
+          (integral (delay dvc) vc0 dt))
+        (define dvc
+          (scale-stream il (- (/ L C))))
+        (define dil
+          (add-streams
+           (scale-stream il (- (/ R L)))
+           (scale-stream vc (/ 1 L))))
+        (cons il vc))
+      r)
 
 ## 3.81
 
