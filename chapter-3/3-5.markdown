@@ -93,6 +93,22 @@ Anlamak için `(expand 3 8 10)`u çalıştıralım. İlk elemanı `(quotient (* 
                      (it (stream-cdr stream) (+ div 1))))
       (it stream 1))
 
+    (define exp-series
+      (cons-stream 1 (integrate-series exp-series)))
+
+    (define hs
+      ;; 0 -1 0 1
+      (cons-stream 0 (cons-stream -1 (cons-stream 0 (cons-stream 1 hs)))))
+
+    (define cosine-series
+      (mul-streams hs exp-series))
+
+    (define shs
+      ;; 1 0 -1 0
+      (cons-stream 1 (cons-stream 0 (cons-stream -1 (cons-stream 0 shs)))))
+
+    (define sine-series
+      (mul-streams shs exp-series))
 
 ## 3.60
 
@@ -115,11 +131,23 @@ Anlamak için `(expand 3 8 10)`u çalıştıralım. İlk elemanı `(quotient (* 
 
 ## 3.61
 
-TODO
+    (define (invert-unit-series s)
+      (define x
+        (cons-stream 1
+                     (scale-stream (mul-series s x) -1)))
+      x)
 
 ## 3.62
 
-TODO
+    (define (div-series s1 s2)
+      (if (zero? (stram-car s2))
+          (error "0 in divisor -- DIV-SERIES")
+          (mul-series s1 (invert-unit-series s2))
+      
+    (define tangent-series
+      (div-series sine-series cose-series))
+
+Not: Bu çözüm tam değil. `div-series` `s2`nin her bir teriminin 0 olup olmadığını kontrol etmeli, burda sadece ilk terimini kontrol ediyor.
 
 ## 3.63
 
@@ -485,4 +513,36 @@ Rest için rand'ı yeniden çağırmak gerekiyor.
 
 ## 3.82
 
-TODO
+    (define (monte-carlo experiment)
+      (let ((trials-passed 0)
+            (total-trials 0))
+        (define s
+          (if (experiment)
+              (begin (set! trials-passed (+ 1 trials-passed))
+                     (set! total-trials (+ 1 total-trials)))
+              (set! total-trials (+ 1 total-trials)))
+          (stream-cons (/ trials-passed total-trials)
+                       s))
+        s))
+
+Assignment kullanmadan da şu şekilde yapabilirdik:
+
+    (define (monte-carlo experiment)
+      (define (iter trials-passed total-trials)
+        (let ((total-trials (+ 1 total-trials)))
+        (if (experiment)
+            (stream-cons (/ (+ 1 trials-passed) total-trials)
+                         (iter (+ 1 trials-passed) total-trials))
+            (stream-cons (/ trials-passed total-trials)
+                         (iter trials-passed total-trials)))))
+      (iter 0 0))
+
+    (define (estimate-integral exp x1 x2 y1 y2)
+      (define (test)
+        (exp (random-in-range x1 x2) (random-in-range y1 y2)))
+      (define (iter monte-carlo-stream)
+        (cons-stream (* (abs (* (- x2 x1) (- y2 y1)))
+                        (stream-car monte-carlo-stream))
+                     (iter (stream-cdr monte-carlo-stream))))
+      (iter (mone-carlo exp)))
+
