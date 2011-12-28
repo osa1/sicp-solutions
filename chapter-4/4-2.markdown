@@ -1,0 +1,136 @@
+## 4.25
+
+`unless` normal bir fonksiyon olduğundan(özel bir form, macro vs. değil yani), applicative order'da çalışmayacaktır. Sürekli olarak ikinci parametresi(`(* n (factorial (- n 1)))`) çalıştırılacak. 
+
+Normal order'da çalışacak çünkü n = 1 olduğunda `(* n (factorial (- n 1)))` kısmı çalıştırılmayacak.
+
+## 4.26
+
+`unless` higher order fonkisyon olarak nasıl kullanılabilir hiçbir fikrim yok. Ama `unless` değil de başka fonksiyonlarda Alyssa'danın dediği mantıklı olabilir.
+
+Kendi Scheme yorumlayıcımıza `unless`i şu şekilde ekleyebiliriz:
+
+    (define (unless? exp)
+      (tagged-list? exp 'unless))
+
+    (define (unless-predicate exp)
+      (cadr exp))
+
+    (define (unless-consequent exp)
+      (caddr exp))
+
+    (define (unless-alternative exp)
+      (if (not (null? (cdddr exp)))
+          (cadddr exp)
+          'false))
+
+    (define (unless->if exp)
+      (make-if (list 'not (unless-predicate exp))
+               (unless-consequent exp)
+               (unless-alternative exp)))
+
+`not`ı `primitive-procedures`a eklememiz lazım, ben bu aşamaya geldiğimde `primitive-procedures` şöyleydi:
+
+(define primitive-procedures
+  (list (list 'car car)
+        (list 'cdr cdr)
+        (list 'cons cons)
+        (list 'null? null?)
+        (list '+ +)
+        (list 'map map)
+        (list '= =)
+        (list 'not not)))
+
+Bunların bir kısmını başka testler için eklemiştim tabii. Son olarak `eval`a eklenecek:
+    ((unless? exp) (eval (unless->if exp) env))
+
+## 4.27
+
+`(define w (id (id 10)))` çalıştırıldığında aslında `id` fonksyionları `w`nin değerine ihtiyaç duyulana kadar çalıştırılmayacak, o yüzden ilk başta `count`ın değeri 0 olmalı diye düşünmüştüm:
+
+    > (define count 0)
+    #!unspecific
+    > (define (id x) (set! count (+ count 1)) x)
+    #!unspecific
+    > (define w (id (id 10)))
+    #!unspecific
+    > count
+    1
+    > w
+    10
+    > count
+    2
+
+`count`ın değerinin 0 değil de 1 olmasının sebebi, `eval-definition`ın atama işlemi sırasında bir kere `apply` uygulaması. Bunu farketmek için standard olup olmadığından emin olmadığım(ama en azındaın mit-scheme'de çalışıyor) `trace` fonksiyonunu kullanabilirsiniz. `(trace apply)` derseniz, `apply` fonksiyonu her çağırıldığında hangi parametrelerle çağırıldığını ekrana yazdıracaktır.
+
+Burda öğreneceğimiz 2 şey, yorumlayıcımız biraz daha `lazy` olabilir, ve lazy evaluation olduğu durumlarda yan etkileri kontrol etmek zor.
+
+## 4.28
+
+strict procedurelar. Eğer operatorun değerini `force` etmezsek strict olup olmadığını anlayamayacağımızdan strict operatorlerde kodumuz beklediğimiz gibi çalışmayacak.
+
+Bu şekilde `force` ettiğimizde de 4.27'deki yeterince lazy olmayan durum ortaya çıkıyor işte.
+
+## 4.29
+
+Memoization yapıldığında `count`ın değeri 1, yapılmadığında 2 olmalı. Sebebi, memoize yaptığımız durumda `(id 10)` bir kere çalıştırılıp değeri kaydediliyor ve bir daha gerektiğinde fonksiyon çalıştırılmadan bu değer kullanılıyor, dolayısıyla yan etkiler bir kere oluşuyor.
+
+## 4.30
+
+a) Bunu test edebilmek için yine `primitive-procedures`ı güncellemek gerekiyor. Bu hemen aklıma şunu getirdi: primitive operasyonlar strict bir şekilde çalışıyorlar.
+
+Fakat burda başka bir sorun daha var, fonksiyonu şu şekilde değiştirelim:
+
+    (for-each (lambda (x) (newline) (set! x (+ x 1)) (display x))
+              '(57 321 88))
+
+`lambda` kısmı çalıştırılırken, `newline` ve `display` kısmı primitive bir operator olduğundan hemen çalıştırılıyor. Fakat bu durumda `(set! ..)` kısmının çalıştırılmaması gerekirdi. Bu kısmı çözemedim.
+
+b) p2 örneği süper, `p` fonksiyonunda `e`nin değerine ihtiyaç yok, `eval-sequence`, e ve x'i çalıştırırken `e`yi zorlamıyor(`force`) ve x'in değerini dönüyor, yani x güncellenmemiş oluyor. Bu durumda Cy'nin dediği değişikliği yapmak mantıklı olabilir.
+
+Eğer Cy'nin dediği değişikliği yapmış olsaydık, `eval-sequence` tüm expressionları `force` edecek ve bu yüzden `x` güncellenmiş olacaktı.
+
+c) a şıkkında bahsettiğim şeyden dolayı çözemedim bunu da. Çağırdığımız fonksiyonların primitive olmasıyla bir alakası yok, o zaman nasıl oluyor da a şıkkında tüm expler çalışıyor?
+
+d) Cy'nin yaklaşımı tam olarak doğru bence. Diğer türlü yan etkileri beklediğimiz şekilde uygulayabilmemiz mümkün değil.
+
+
+## 4.31
+
+Bir programlama dili yazacak olsaydım tam olarak böyle yapardım ben de(dil bir Lisp dili olurdu ve `:lazy` ve `:lazy-memo` keywordlerini kullanırdım).
+
+Şu an için nasıl yapabileceğimi çözemedim. Parametreleri bir şekilde `tagged-list`lere dönüştürüp, `list-of-args`da bu etiketlere göre işlem yapmak gerekecek sanırım.
+
+TODO
+
+## 4.32
+
+Benim aklıma ölümcül bir örnek gelmiyor ama her türlü `car`ının yan etkilere sahip bir expression olduğu(veya hesaplanmasının çok zaman aldığı) şeyi kullanabiliriz. Örneğin aşağıdaki kod bölüm 3'deki `cons-stream` ile ekrana 1 yazdırırken, şu anda sadece `car`ını istediğimizde ekrana 1 yazdırır:
+
+    (car (cons (display 1) (display 2)))
+
+## 4.33
+
+Bunun için `text-of-quotation`da, `quote` ettiğimiz değerden yeni tanımladığımız lazy cons ile bir liste elde etmemiz lazım:
+
+    (define (text-of-quotation exp env)
+      (if (list? (cadr exp))
+          (eval (make-lazy-list (cadr exp)) env)
+          (cadr exp)))
+
+    (define (make-lazy-list exp)
+      (if (null? exp)
+          '()
+          (list 'cons (car exp) (make-lazy-list (cdr exp)))))
+
+Burda `text-of-quotation` artık derived expression ürettiği için `eval`da küçük bir değişiklik yaparak `text-of-quotation`a `env`i de aktarmamız lazım.
+
+Bunun dışında bu aşamada yorumlayıcımın `'()` ile karşılaştığında çakıldığını farkettim ve şöyle bir satır ekledim:
+
+        ((null? exp) '())
+
+## 4.34
+
+TODO
+
+
