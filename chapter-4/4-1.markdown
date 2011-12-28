@@ -1,0 +1,448 @@
+Bu bölümde MIT Scheme kullandım. Kitabın web sayfasından erişilebilir.
+
+Tüm alıştırmaları test ede ede yapabilmek için ilk başta çalışan bir yorumlayıcı gerekiyor. Kitapdaki kodları bir araya getirip(alıştırmaları atlayarak), kolay okunulabilmesi için biraz düzenleyerek `metacircular-evaluator` klasörüne `starter.scm` adlı bir dosyaya koydum çalışan halini. Tüm alıştırmaları da onun üzerinden yaparak her alıştırmadan sonra test edip doğru çalıştığından emin olacağım.
+
+## 4.1
+
+    (define (list-of-values exps env)
+      (if (no-operands? exps)
+          '()
+          (let ((first-val (eval (first-operand exps) env)))
+            (cons first-val
+                  (list-of-values (rest-operands exps) env)))))
+
+Bu sayede `first-val` hesaplanmadan `let` çalıştırılmayacak, `cons`un hangi sırayla çalıştırdığı önemli değil artık, `first-val` zaten ilk expression'ın çalıştırıldığında döndüğü değer.
+
+
+## 4.2
+
+Louis `(application? exp)`i `(assignment? exp)`den önce koymayı planlıyor.
+
+a) `(define x 3)` aynı zamanda bir application olduğundan, atama işlemi yapılmadan önce `(apply (eval (operator exp) env) (list-of-values (operands exp) env))` çalıştırılacak. Burda
+`(operator exp)` `define` dönecek ve `(eval 'define env)` çalıştırılacak ve hata alacağız(`eval`daki test fonksiyonlarına bakarsak, hepsi `tagged-list` bekliyor ama biz sembol gönderiyoruz).
+
+
+b) Sadece `application?`ı değiştirmemiz yeterli.
+
+    (define (application? exp)
+      (tagged-list? exp 'call))
+
+`application` testinden sonra çalıştırmak için `operator` ve `operands`ı da düzenlememiz gerek.
+
+    (define (operator exp) (cadr exp))
+    (define (operands exp) (cddr exp))
+
+## 4.3
+
+    (define (eval exp env)
+      (if (self-evaluating? exp)
+          exp
+          (let ((op (get (car exp))))
+            (if op
+                (op (operands exp) env)
+                (error "Unknown expression type -- EVAL" exp)))))
+
+Burda `get` fonksiyonunun döndüğü operatorlerin yeterince `generic` olduğunu varsaydım, parametre tipleriyle uğrşamadım.
+
+## 4.4
+
+`and` ve `or`u `eval` içinde `application?`dan önce nereye koyarsak olur. Ben biraz alakalılar diye `if?`in altına koydum:
+
+    (define (eval exp env)
+      (cond ((self-evaluating? exp) exp)
+            ((variable? exp) (lookup-variable-value exp env))
+            ((quoted? exp) (text-of-quotation exp))
+            ((assignment? exp) (eval-assignment exp env))
+            ((definition? exp) (eval-definition exp env))
+            ((if? exp) (eval-if exp env))
+            ((and? exp) (eval-and exp env))
+            ((or? exp) (eval-or exp env))
+            ((lambda? exp)
+             (make-procedure (lambda-parameters exp)
+                             (lambda-body exp)
+                             env))
+            ((begin? exp)
+             (eval-sequence (begin-actions exp) env))
+            ((cond? exp) (eval (cond->if exp) env))
+            ((application? exp)
+             (apply (eval (operator exp) env)
+                    (list-of-values (operands exp) env)))
+            (else
+             (error "Unknown expression type -- EVAL" exp))))
+
+Yardımcı fonksiyonlar ve eval fonksiyonu:
+
+    (define (and? exp) (tagged-list? exp 'and))
+
+    (define (and-first-clause exp)
+      (car exp))
+
+    (define (and-rest-clauses exp)
+      (cdr exp))
+
+    (define (and-clauses exp)
+      (cdr exp))
+
+    (define (eval-and exp env)
+      (define (and-iter exp last-true)
+        (if (null? exp)
+            last-true
+            (let ((result-first-clause
+                   (eval (and-first-clause exp) env)))
+              (if (not result-first-clause)
+                  result-first-clause
+                  (and-iter (and-rest-clauses exp) result-first-clause)))))
+      (and-iter (and-clauses exp) '()))
+
+Dönüş değeri olarak #f veya #t değil de, eğer elemanların hepsi #t ise son #t elemanı, değilse #f elemanı dönüyor. Scheme'deki `and` davranışı bu şekilde. `or`da da benzer birşey yapacağım.
+
+Bu arada bir not düşeyim, henüz yorumlayıcımız çalışır halde olmadığından test edemiyorum. Çalışır hale geldiğinde test edeceğiz zaten, bir yanlışlık varsa düzelteceğim.
+
+`or` için de benzer:
+
+    (define (or? exp) (tagged-list? exp 'or))
+
+    (define (or-first-clause exp)
+      (car exp))
+
+    (define (or-rest-clauses exp)
+      (cdr exp))
+
+    (define (or-clauses exp)
+      (cdr exp))
+
+    (define (eval-or exp env)
+      (define (or-iter exp last-false)
+        (if (null? exp)
+            last-false
+            (let ((result-first-clause
+                   (eval (or-first-clause exp) env)))
+              (if result-first-clause
+                  result-first-clause
+                  (or-iter (or-rest-clauses exp) result-first-clause)))))
+      (or-iter (or-clauses exp) '()))
+
+## 4.5
+
+
+    (define (cond-extended-clause? clause)
+      (eq? (car (cond-actions clause)) '=>))
+
+    (define (cond-extended-clause-action clause)
+      (cadr (cond-actions clause)))
+
+    (define (expand-clauses clauses)
+      (if (null? clauses)
+          'false                          ; no else clause
+          (let ((first (car clauses))
+                (rest (cdr clauses)))
+            (if (cond-else-clause? first)
+                (if (null? rest)
+                    (sequence->exp (cond-actions first))
+                    (error "ELSE clause isn't last -- COND->IF"
+                           clauses))
+                (if (cond-extended-clause? first)
+                    (make-if (cond-predicate first)
+                             (list (cond-extended-clause-action first)
+                                   (cond-predicate first))
+                             (expand-clauses rest))
+                    (make-if (cond-predicate first)
+                             (sequence->exp (cond-actions first))
+                             (expand-clauses rest)))))))
+
+Burda yorumlayıcının şu anki işlevselliğiyle, => kullanılan clause'da test kısmının bir kere çalıştırılmasını halledemedim. Yani örneğin kitapdaki şu kodda:
+
+    (cond ((assoc 'b '((a 1) (b 2))) => cadr)
+          (else false))
+
+`(assoc 'b ...)` kısmı iki kere çalışacak(eğer true dönerse).
+
+## 4.6
+
+    (define (let? exp)
+      (tagged-list? exp 'let))
+
+    (define (let->combination exp)
+      (expand-let (let-body exp)))
+
+    (define (let-body let-exp)
+      (cdr let-exp))
+
+    (define (let-bindings let-body)
+      (car let-body))
+
+    (let-bindings '(let ((a 1) (b 2)) 'fuu))
+
+    (define (let-vars let-bindings)
+      (define (iter bindings result)
+        (if (null? bindings)
+            (reverse result)
+            (iter (cdr bindings) (cons (caar bindings) result))))
+      (iter let-bindings '()))
+
+    (define (let-vals let-bindings)
+      (define (iter bindings result)
+        (if (null? bindings)
+            (reverse result)
+            (iter (cdr bindings) (cons (cadar bindings) result))))
+      (iter let-bindings '()))
+
+    (define (let-lambda-body let-body)
+      (cdr let-body))
+
+    (define (expand-let let-exp)
+      (list (make-lambda (let-vars (let-bindings let-exp))
+                    (list  (sequence->exp (let-lambda-body let-exp))))
+            (let-vals (let-bindings let-exp))))
+
+`eval`ın içinde de `application?`dan önce herhangi bir yere yerleştirilebilir.
+
+## 4.7
+
+    (define (let*? exp)
+      (tagged-list? exp 'let*))
+
+    (define (let*->nested-lets exp)
+      (let*-expand (cadr exp) (caddr exp)))
+
+    (define (let*-expand defs body)
+      (if (null? defs)
+          body
+          (list 'let (list (car defs))
+                (let*-expand (cdr defs) body))))
+
+`(eval (let*->nested-lets exp) env)` yeterli.
+
+## 4.8
+
+Öncelikle `named-let`i tanımak için `let->combination`da şöyle bir değişiklik yapmamız gerek:
+
+    (define (let->combination exp)
+      (if (pair? (cadr exp))
+          (expand-let (let-body exp))
+          (expand-named-let exp))) ;; yeni
+
+Daha sonra klasik yardımcılar ve dönüşüm fonksiyonumuz:
+
+    (define (let-body let-exp)
+      (cdr let-exp))
+
+    (define (named-let-body named-let)
+      (cdddr named-let))
+
+    (define (named-let-name named-let)
+      (cadr named-let))
+
+    (define (named-let-bindings named-let)
+      (caddr named-let))
+
+    (define (expand-named-let let-exp)
+      (list (list 'define (named-let-name let-exp)
+                  (make-lambda (let-vars (named-let-bindings let-exp))
+                               (named-let-body let-exp)))
+            (list (named-let-name let-exp) (let-vals (named-let-bindings let-exp)))))
+
+## 4.9
+
+Örneğin şöyle bir `while` formumuz olabilir:
+
+    (while (<bindings>) <test-func> <body>)
+
+Burda tüm değişkenler için `<body>` çalıştırıldıktan sonra tüm değişkenler `<test-func>`a gönderilerek test yapılır ve duruma göre `<body>` bir daha çalıştırılır(fonksiyon bir daha çağırılır).
+
+`until`de bunun tam tersi(`<test-func>` #f değil de #t dönene kadar çalıştırılacak).
+
+TODO
+
+## 4.10
+
+Bu soruyu yapmayacağım, yapmamız istenen şey bariz: expression'ın tipini belirleyen `let?`, `if?` gibi fonksiyonları yeni syntax'a göre değiştirmek, sonra da örneğin `lambda-body` gibi expression'ı parçalara ayıran fonksiyonları yeni syntax'a uyarlamak.
+
+## 4.11
+
+TODO
+
+## 4.12
+
+Hepsinde değişkeni bulmak için arama yapılan bir kısım var, daha sonra bulunup bulunmama durumuna göre farklı işlemler yapılıyor. Ben bu kısmı `scan-variable` adlı bir fonksiyona dönüştürdüm ve diğer fonksiyonlarda bunu kullandım:
+
+    (define (scan-variable var env)
+      (define (scan-iter vars vals)
+        (cond ((null? vars) '())
+              ((eq? var (car vars))
+               (cons vars vals))
+              (else (scan-iter (cdr vars) (cdr vals)))))
+      (if (eq? env the-empty-environment)
+          '()
+          (let ((frame (first-frame env)))
+            (let ((r (scan-iter (frame-variables frame)
+                                (frame-values frame))))
+              (if r r (scan-variable var (enclosing-environment env)))))))
+
+    (define (lookup-variable-value var env)
+      (let ((r (scan-variable var env)))
+        (if (null? r)
+            (if (eq? (enclosing-environment env) the-empty-environment)
+                (error "Unbound variable -- LOOKUP" var)
+                (lookup-variable-value var (enclosing-environment env)))
+            (cadr r))))
+
+    (define (set-variable-value! var val env)
+      (let ((r (scan-variable var env)))
+        (if (null? r)
+            (error "Unbound variable -- SET!" var)
+            (set-car! (cdr r) val))))
+
+    (define (define-variable! var val env)
+      (let ((r (scan-variable var env)))
+        (if (null? r)
+            (add-binding-to-frame! var val (first-frame env))
+            (set-car! (cdr r) val))))
+
+## 4.13
+
+Üst framelerdeki değişkenleri unbound yapmak bana biraz korkunç geldi. Sanırım mantıklı olan sadece bulunulan framedeki değişkenleri unbound yapabilmek. Hem implementasyonu da daha kolay haeuheah.
+
+Burda birkaç yöntem uygulanabilir. Birincisi, `unbound` yapılan değişkene unbound olduğunu belirten bir değer atanabilir(mesela `'unbound`, ama ya kullanıcı kendisi bir değişkene `'unbound` atamak isterse?), ikincisi de bir şekilde frame'den o değişkeni çıkarmak.
+
+Değişkenleri liste halinde tuttuğumuza göre, tüm değişkenleri gezerek, aradığımız değişken olmayanları toplayabiliriz:
+
+    (define (set-first-frame! env frame)
+      (set-car! env frame))
+
+    (define (make-unbound! var env)
+      (define (collect-bindings vars vals r-vars r-vals)
+        (cond ((null? vars) (make-frame r-vars r-vals))
+              ((eq? (car vars) var)
+               (collect-bindings (cdr vars) (cdr vals) r-vars r-vals))
+              (else
+               (collect-bindings (cdr vars) (cdr vals)
+                                 (cons (car vars) r-vars)
+                                 (cons (car vals) r-vals)))))
+      (let ((first-frame (first-frame env)))
+        (let ((new-frame (collect-bindings (frame-variables first-frame)
+                                           (frame-values first-frame)
+                                           '() '())))
+          (set-first-frame! env new-frame))))
+
+`eval`a(`application?`dan önce):
+
+    ((make-unbound? exp) (eval-unbound-var exp env))
+
+Yardımcı fonksiyonlar:
+
+    (define (make-unbound? exp)
+      (tagged-list? exp 'make-unbound!))
+
+    (define (eval-unbound-var exp env)
+      (make-unbound! (cadr exp) env))
+
+Bu arada aklıma geldi, hala daha Common Lisp'e çok hakim değilim ama sanırım bu özellik Common Lisp'de var, birkaç herde `(declare (ignore var))` şeklinde bir kullanım görmüştüm. Aynı şey mi emin değilim ama.
+
+Bu arada `make-unbound!`un primitive değişkenler için çalışmayacağına dikkat.
+
+## 4.14
+
+Benim aklıma bir tane bariz sebep geliyor, ama bundan başka sebepleri de olabilir: Tüm veriyi etiketlemnmiş bir şekilde(`tag`) tutuyoruz, örneğin bir tamsayı tutarken, yorumlayıcının kullandığı dilin tamsayı tipinde tutuyoruz ve `'primitive` ile etiketliyoruz. `lambda`da da etiket olarak `procedure` kullanıyoruz mesela, halbuki primitive map işlemi parametre olarak kensine göre farklı bir şekilde tutulmuş fonksiyonlar bekliyor(bir şekilde daha alt bir seviyeye derlenmiş, veya farklı şekillerde etiketlenmiş vs.).
+
+## 4.15
+
+Hehe bu problemi biliyordum ben :) .
+
+Fonksiyon şöyle gözümüzün önünde dursun:
+
+    (define (try p)
+      (if (halts? p p)
+          (run-forever)
+          'halted))
+
+Bu sonksiyonu `(try try)` şeklinde çağırdığımızdan, `p`leri `try` gibi düşünebiliriz. Şimdi, Eğer `(try try)` sonlanırsa, `(halts? p p)` kısmı #t dönecek, sonlanmazsa #f dönmüş olacak. Diyelim ki sonlanır, yani `(halts? p p)` #t döner. O zaman `(run-forever)` kısmı çalışacak ve `(try try)` durmayacak. Çelişki.
+
+İkinci ihtimal, `(try try)` sonlanmasın. O zaman `(halts? p p)` #f dönecek ve `(try try)` `'halted` dönecek, yani sonlanacak. Yine çelişki.
+
+Demek ki `halts?` diye bir fonksiyon yazamıyormuşuz.
+
+## 4.16
+
+a)
+
+(define (lookup-variable-value var env)
+  (let ((r (scan-variable var env)))
+    (if (null? r)
+        (if (eq? (enclosing-environment env) the-empty-environment)
+            (error "Unbound variable -- LOOKUP" var)
+            (lookup-variable-value var (enclosing-environment env)))
+        (if (eq? '*unassigned* (cadr r))
+            (error "Variable is unassigned -- LOOKUP" var)
+            (cadr r)))))
+
+b) Biraz karışık oldu ama idare edin:
+
+    (define (scan-out-defines lambda-body)
+      (define (split-defs body vars vals other)
+        (if (null? body)
+            (list (reverse vars) (reverse vals) (reverse other))
+            (if (definition? (car body))
+                (split-defs (cdr body)
+                            (cons (definition-variable (car body)) vars)
+                            (cons (definition-value (car body)) vals)
+                            other)
+                (split-defs (cdr body) vars vals (cons (car body) other)))))
+      (define (make-sets vars vals)
+        (map (lambda (var val) (list 'set! var val)) vars vals))
+      (define (make-unassigned-lets vars)
+        (map (lambda (var) (list var '*unassigned*)) vars))
+      (let ((parts (split-defs lambda-body '() '() '())))
+        (let ((vars (car parts))
+              (vals (cadr parts))
+              (other (caddr parts)))
+          (apply-in-underlying-scheme list
+           'let (make-unassigned-lets vars)
+           (append  (make-sets vars vars)
+                    other)))))
+
+`split-defs` fonksiyonunun yaptığı iş Clojure'da `partition-by` fonksiyonu ile çok rahat bir şekilde yapılabilirdi. Öyle aklıma geldi söyleyeyim dedim :P .
+
+c) Bu işlemi `make-procedure`da yapmak bana daha mantıklı geldi. Compile-time'da yapmak performans kazandıracaktır.
+
+`make-procedure`u şu şekilde değiştiriyoruz:
+
+    (define (make-procedure parameters body env)
+      (list 'procedure
+            parameters
+            (scan-out-defines body)
+            env))
+
+## 4.17
+
+Ekstra bir frame `let`den geliyor. Fonksiyonun yaptığı aslında bir `let` yapısı oluşturup onun sonucunu dönmek. Aslında bu `let`den başka birşey yapmıyor yani fonksiyon.
+
+Aklıma gelen çözüm şu: Eğer bu içteki `let` tanımladığı değişkenleri fonksiyon tanımına alabilirsek, ve bir şekilde sürekli o parametrelere `let`in değerlerini gönderebilirsek, ekstra bir frame oluşturmamıza gerek kalmayacak.
+
+## 4.18
+
+İki durumda da çalışmayacaktır. Herhangi bir değişken ilk çağırıldığında, diğer değişkenin değeri `'*unassigned*` olmuş olacak.
+
+## 4.19
+
+Eva'nın bahsettiği epey zor gibi. Öncelikle tüm tanımlamaların dolaşıp başka bir değişkene ihtiyaç duymayanlara gerekli atamaları yapmamız gerek(örneğin kitapdaki örnekte `a`). Daha sonra buna ihtiyaç duyanlara gerekli atamları ve daha sonra en son atama yaptıklarımıza .. şeklinde gider. Burda bir diğer problem de, eğer iki değişken bir şekilde birbirlerini kullanıyorlarsa, bu durum çözülemez.
+
+## 4.20
+
+TODO
+
+## 4.21
+
+TODO
+
+## 4.22
+
+TODO
+
+## 4.23
+
+TODO
+
+## 4.24
+
+TODO
